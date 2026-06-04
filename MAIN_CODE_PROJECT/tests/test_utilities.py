@@ -9,7 +9,7 @@ import pytest
 
 def get_app_classes():
     project_root = Path(__file__).parent.parent
-    src_dir = project_root / "MAIN_CODE_PROJECT" / "src"
+    src_dir = project_root / "src"
     app_classes = []
     for f in sorted(os.listdir(src_dir)):
         if f.endswith('.py') and not f.startswith('__'):
@@ -17,7 +17,7 @@ def get_app_classes():
             try:
                 mod = importlib.import_module(mod_name)
                 for name, obj in inspect.getmembers(mod, inspect.isclass):
-                    if name.endswith('App') and obj.__module__ == mod_name:
+                    if name.endswith('App') and name != 'BaseApp' and obj.__module__ == mod_name:
                         app_classes.append((f[:-3], obj))
             except Exception:
                 pass

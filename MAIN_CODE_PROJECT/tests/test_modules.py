@@ -9,13 +9,13 @@ class TestProjectConfiguration:
 
     def test_environment_yml_exists(self):
         """Test that environment.yml exists"""
-        project_root = Path(__file__).parent.parent
+        project_root = Path(__file__).parent.parent.parent
         env_file = project_root / "environment.yml"
         assert env_file.exists(), "environment.yml not found at project root"
 
     def test_environment_yml_has_content(self):
         """Test that environment.yml has proper content"""
-        project_root = Path(__file__).parent.parent
+        project_root = Path(__file__).parent.parent.parent
         env_file = project_root / "environment.yml"
         content = env_file.read_text()
         assert "python" in content.lower(), "environment.yml should specify python"
@@ -23,19 +23,19 @@ class TestProjectConfiguration:
 
     def test_readme_exists(self):
         """Test that README.md exists"""
-        project_root = Path(__file__).parent.parent
+        project_root = Path(__file__).parent.parent.parent
         readme = project_root / "README.md"
         assert readme.exists(), "README.md not found"
 
     def test_github_workflows_exist(self):
         """Test that GitHub workflows are configured"""
-        project_root = Path(__file__).parent.parent
+        project_root = Path(__file__).parent.parent.parent
         workflows_dir = project_root / ".github" / "workflows"
         assert workflows_dir.exists(), ".github/workflows directory not found"
 
     def test_python_package_conda_workflow_exists(self):
         """Test that python-package-conda.yml workflow exists"""
-        project_root = Path(__file__).parent.parent
+        project_root = Path(__file__).parent.parent.parent
         workflow_file = project_root / ".github" / \
             "workflows" / "python-package-conda.yml"
         assert workflow_file.exists(), "python-package-conda.yml workflow not found"
@@ -45,20 +45,22 @@ class TestWeek1Structure:
     def test_week1_directory_exists(self):
         """Test that week-1 directory exists"""
         project_root = Path(__file__).parent.parent
-        week1_dir = project_root / "MAIN_CODE_PROJECT" / "week-1"
+        week1_dir = project_root / "week-1"
         assert week1_dir.exists(), "week-1 directory not found"
 
     def test_week1_has_days(self):
         """Test that week-1 has day directories"""
         project_root = Path(__file__).parent.parent
-        week1_dir = project_root / "MAIN_CODE_PROJECT" / "week-1"
+        week1_dir = project_root / "week-1"
 
         expected_days = ["day-1", "day-2", "day-3",
                          "day-4", "day-5", "day-6", "day-7"]
         for day in expected_days:
             day_path = week1_dir / day
             assert day_path.exists(), f"{day} directory not found in week-1"
-=======
+
+
+"""
 Functional tests that exercise real module workflows and business logic
 """
 import importlib
@@ -70,7 +72,7 @@ import pytest
 
 def get_app_instances():
     project_root = Path(__file__).parent.parent
-    src_dir = project_root / "MAIN_CODE_PROJECT" / "src"
+    src_dir = project_root / "src"
     instances = []
     for f in sorted(os.listdir(src_dir)):
         if f.endswith('.py') and not f.startswith('__'):
@@ -123,7 +125,7 @@ class TestModuleWorkflows:
                 tail = inst.history_tail(3)
                 assert isinstance(tail, list)
             if hasattr(inst, 'export_state') and callable(inst.export_state):
-                inst.output_dir = Path(__file__).parent.parent / "MAIN_CODE_PROJECT" / "outputs"
+                inst.output_dir = Path(__file__).parent.parent / "outputs"
                 inst.output_dir.mkdir(exist_ok=True)
                 path = inst.export_state()
                 assert path.exists(), f"{name} export_state() should create file"
