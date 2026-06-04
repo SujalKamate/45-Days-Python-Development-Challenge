@@ -22,12 +22,53 @@ class RockPaperScissorsAppState:
     runs: int = 0
     errors: int = 0
 
+# ---------------- APP ----------------
+
 class RockPaperScissorsApp:
     def __init__(self) -> None:
+        self.stats = {
+            "wins": 0,
+            "losses": 0,
+            "draws": 0
+            }
+        self.player_history = []
         self.state = RockPaperScissorsAppState()
         self.output_dir = Path('outputs')
         self.output_dir.mkdir(exist_ok=True)
-
+        
+    def ai_predict_move(self, player_history: List[str]) -> str:
+        """
+        Adaptive AI:
+        - Learns frequency of player moves
+        - Adds randomness to avoid predictability
+        """
+        if not player_history:
+            return random.choice(['rock', 'paper', 'scissors'])
+        
+        freq = {'rock': 0, 'paper': 0, 'scissors': 0}
+        
+        for move in player_history:
+            if move in freq:
+                freq[move] += 1
+                
+        most_common = max(freq, key=freq.get)
+            
+         # counter logic
+            
+        if random.random() < 0.2:
+            return random.choice(['rock', 'paper', 'scissors'])
+        
+        counter = {
+            'rock': 'paper',
+            'paper': 'scissors',
+            'scissors': 'rock'
+            }
+        
+        return counter[most_common]
+    
+    def format_kv(self, k: str, v: Any) -> str:
+        return f"{k:<20} : {v}"
+    
     def log(self, message: str) -> None:
         stamp = datetime.now().strftime('%H:%M:%S')
         entry = f'[{stamp}] {message}'
@@ -186,43 +227,66 @@ class RockPaperScissorsApp:
             'rounds': rounds
         }
 
+ # ---------------- GAME ENGINE ----------------
     def run(self) -> None:
         self.state.runs += 1
         self.section('Rock-Paper-Scissors: 5 Rounds')
-        choices = ['rock', 'paper', 'scissors']
-        player_moves = ['rock', 'paper', 'scissors', 'rock', 'paper']
+        #player_moves = ['rock', 'paper', 'scissors', 'rock', 'paper']
         player_score = 0
         computer_score = 0
+        draws = 0
         round_results = []
-        for i in range(5):
-            player = player_moves[i]
-            computer = random.choice(choices)
+        while True:
+            n = int(input("Enter Best-of-N rounds (odd number): "))
+            if n > 0 and n % 2 == 1:
+                break 
+            print("Please enter a positive odd number.")
+        needed = (n // 2) + 1
+        i = 0
+        while player_score < needed and computer_score < needed and i < n:           
+            player = input("Choose rock/paper/scissors: ").strip().lower()
+            while player not in ["rock", "paper", "scissors"]:
+                player = input("Invalid choice. Enter rock/paper/scissors: ").strip().lower()
+            self.player_history.append(player)
+            computer = self.ai_predict_move(self.player_history)
             if player == computer:
                 result = 'draw'
+                draws += 1
             elif (player == 'rock' and computer == 'scissors') or (player == 'scissors' and computer == 'paper') or (player == 'paper' and computer == 'rock'):
                 result = 'player'
-                player_score += 1
+                player_score += 1               
             else:
                 result = 'computer'
                 computer_score += 1
             print(self.format_kv(f'Round {i+1}', f'Player: {player} vs Computer: {computer} -> {result}'))
             round_results.append({'round': i+1, 'player': player, 'computer': computer, 'result': result})
-        print()
+            i += 1 
+            
+        # AFTER LOOP
         if player_score > computer_score:
             winner = 'Player'
         elif computer_score > player_score:
             winner = 'Computer'
         else:
-            winner = 'Draw'
+            winner = 'Draw'  
+                
+        # FINAL STATS CALCULATION (ADD HERE)
+        self.stats["wins"] = player_score
+        self.stats["losses"] = computer_score
+        self.stats["draws"] = draws        
         print(self.format_kv('Final', f'Player {player_score} - {computer_score} Computer'))
         print(self.format_kv('Winner', winner))
+        print(self.format_kv("Stats Wins", self.stats["wins"]))
+        print(self.format_kv("Stats Losses", self.stats["losses"]))
+        print(self.format_kv("Stats Draws", self.stats["draws"]))
         self.record('rounds', round_results)
-        self.record('scores', {'player': player_score, 'computer': computer_score, 'winner': winner})
+        self.record('scores', {'player': player_score, 'computer': computer_score, 'winner': winner})       
         self.display_report()
+        
     def finalize(self) -> None:
         self.export_state()
         self.log('Finalized successfully')
-
+ 
 def main() -> None:
     app = RockPaperScissorsApp()
     try:
@@ -233,8 +297,6 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
-<<<<<<< Updated upstream
-=======
 
 
 
@@ -247,4 +309,3 @@ if __name__ == '__main__':
 
 
 
->>>>>>> Stashed changes
