@@ -92,7 +92,8 @@ try:
     response = requests.get(
         url,
         headers=headers,
-        timeout=timeout
+        timeout=timeout,
+        verify=True
     )
 
 

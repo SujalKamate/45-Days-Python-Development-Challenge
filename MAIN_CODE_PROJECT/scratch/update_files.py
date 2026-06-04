@@ -561,13 +561,15 @@ replacements = {
         return self.demo_data()
 
     def process_dataset(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+        import ssl
         import urllib.request
         results = []
+        ssl_ctx = ssl.create_default_context()
         for req in items:
             url = req.get('url', '')
             expected = req.get('expected_status')
             try:
-                response = urllib.request.urlopen(url, timeout=2)
+                response = urllib.request.urlopen(url, timeout=2, context=ssl_ctx)
                 status = response.getcode()
             except Exception as e:
                 status = getattr(e, 'code', 500) if 'HTTPError' in type(e).__name__ else 0
