@@ -189,6 +189,28 @@ class BaseApp:
             'summary': self.summarize_list(values),
         }
 
+    def find_duplicates(self, items: List[Any]) -> List[Any]:
+        """Return duplicate entries in O(n) using a hash set.
+
+        Each item is converted to a hashable key (tuple for dicts,
+        ``str(item)`` for other unhashable types) for O(1) lookup.
+        """
+        seen: set[Any] = set()
+        duplicates: List[Any] = []
+        for item in items:
+            if isinstance(item, dict):
+                key = tuple(sorted(item.items()))
+            else:
+                try:
+                    key = hash(item)
+                except TypeError:
+                    key = str(item)
+            if key in seen:
+                duplicates.append(item)
+            else:
+                seen.add(key)
+        return duplicates
+
     def finalize(self) -> None:
         self.export_state()
         self.log('Finalized successfully')
