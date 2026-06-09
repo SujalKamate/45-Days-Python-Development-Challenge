@@ -161,13 +161,23 @@ class BaseApp:
         }
         return self.save_json('state.json', payload)
 
+    def _report_data(self) -> Dict[str, Any]:
+        return {
+            'runs': self.state.runs,
+            'errors': self.state.errors,
+            'records': len(self.state.records),
+            'flags': len(self.state.flags),
+            'history_entries': len(self.state.history),
+        }
+
+    def format_report(self) -> str:
+        lines = ['', '=' * 70, 'Summary', '=' * 70]
+        for k, v in self._report_data().items():
+            lines.append(self.format_kv(k.replace('_', ' ').title(), v))
+        return '\n'.join(lines)
+
     def display_report(self) -> None:
-        self.section('Summary')
-        print(self.format_kv('Runs', self.state.runs))
-        print(self.format_kv('Errors', self.state.errors))
-        print(self.format_kv('Records', len(self.state.records)))
-        print(self.format_kv('Flags', len(self.state.flags)))
-        print(self.format_kv('History entries', len(self.state.history)))
+        print(self.format_report())
         self.log(f'Exported to {self.export_state()}')
 
     def demo_data(self) -> List[Dict[str, Any]]:
