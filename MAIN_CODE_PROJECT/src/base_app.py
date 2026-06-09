@@ -45,6 +45,14 @@ class BaseApp:
         print('=' * 70)
 
     def non_empty(self, value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return value.strip() != ''
+        if isinstance(value, (list, tuple, dict, set)):
+            return len(value) > 0
+        if isinstance(value, (int, float)):
+            return value != 0
         return bool(str(value).strip())
 
     def safe_int(self, value: Any, default: int = 0) -> int:
@@ -80,7 +88,7 @@ class BaseApp:
         return f'{key:<20} : {value}'
 
     def render_table(self, rows: List[Dict[str, Any]]) -> str:
-        if not rows:
+        if rows is None or not rows:
             return '(empty)'
         keys = list(rows[0].keys())
         widths = {k: max(len(k), max(len(str(row.get(k, ''))) for row in rows)) for k in keys}
@@ -124,7 +132,7 @@ class BaseApp:
         return self.state.flags[key]
 
     def summarize_list(self, values: List[float]) -> Dict[str, Any]:
-        if not values:
+        if values is None or not values:
             return {'count': 0, 'min': 0, 'max': 0, 'avg': 0}
         return {
             'count': len(values),
@@ -134,7 +142,7 @@ class BaseApp:
         }
 
     def stats_from_numbers(self, values: List[float]) -> Dict[str, Any]:
-        if not values:
+        if values is None or not values:
             return {'mean': 0, 'median': 0, 'mode': None, 'stdev': 0}
         try:
             mode_value = statistics.mode(values)
