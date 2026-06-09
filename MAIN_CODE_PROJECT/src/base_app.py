@@ -9,7 +9,13 @@ import math
 import os
 import random
 import statistics
+import threading
 import time
+
+try:
+    from .contracts import DataProvider, DataProcessor, AppRunner
+except ImportError:
+    from contracts import DataProvider, DataProcessor, AppRunner  # type: ignore[import-untyped]
 
 
 @dataclass
@@ -20,15 +26,31 @@ class BaseAppState:
     created_at: datetime = field(default_factory=datetime.utcnow)
     runs: int = 0
     errors: int = 0
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+    _next_id: int = 0
 
 
-class BaseApp:
+class _OutputProxy:
+    def __init__(self, app: BaseApp) -> None:
+        self._app = app
+
+    def section(self, title: str) -> None:
+        self._app.section(title)
+
+    def kv(self, key: str, value: Any) -> None:
+        print(self._app.format_kv(key, value))
+
+
+class BaseApp(DataProvider, DataProcessor, AppRunner):
     def __init__(self) -> None:
         self.state = BaseAppState()
         self.output_dir = Path('outputs')
         self.output_dir.mkdir(exist_ok=True)
         self.seed = 42
         random.seed(self.seed)
+        self.output = _OutputProxy(self)
+        self._tasks: Dict[str, Any] = {}
+        self._next_id: int = 0
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -188,6 +210,15 @@ class BaseApp:
             'active_items': len(active),
             'summary': self.summarize_list(values),
         }
+
+    def run(self) -> None:
+        self.state.runs += 1
+        self.section('Processing')
+        items = self.dataset()
+        result = self.process_dataset(items)
+        self.record('result', result)
+        print(json.dumps(result, indent=2))
+        self.display_report()
 
     def finalize(self) -> None:
         self.export_state()
