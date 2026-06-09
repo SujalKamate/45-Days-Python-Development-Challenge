@@ -13,6 +13,60 @@ import time
 
 
 @dataclass
+class DataPoint:
+    name: str = ''
+    value: float = 0.0
+    active: bool = False
+    metadata: Optional[Dict[str, str]] = None
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+    def keys(self) -> List[str]:
+        return ['name', 'value', 'active']
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {'name': self.name, 'value': self.value, 'active': self.active}
+
+    @staticmethod
+    def from_dict(d: Dict[str, Any]) -> DataPoint:
+        return DataPoint(
+            name=str(d.get('name', '')),
+            value=float(d.get('value', 0)),
+            active=bool(d.get('active', False)),
+            metadata=d.get('metadata') if isinstance(d.get('metadata'), dict) else None,
+        )
+
+
+@dataclass
+class Summary:
+    count: int = 0
+    min_val: float = 0.0
+    max_val: float = 0.0
+    avg: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {'count': self.count, 'min': self.min_val, 'max': self.max_val, 'avg': self.avg}
+
+
+@dataclass
+class DatasetResult:
+    total_items: int = 0
+    active_items: int = 0
+    summary: Optional[Summary] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'total_items': self.total_items,
+            'active_items': self.active_items,
+            'summary': self.summary.to_dict() if self.summary else {},
+        }
+
+
+@dataclass
 class BaseAppState:
     history: List[str] = field(default_factory=list)
     records: Dict[str, Any] = field(default_factory=dict)
@@ -79,7 +133,7 @@ class BaseApp:
     def format_kv(self, key: str, value: Any) -> str:
         return f'{key:<20} : {value}'
 
-    def render_table(self, rows: List[Dict[str, Any]]) -> str:
+    def render_table(self, rows: List[Dict[str, Any] | DataPoint]) -> str:
         if not rows:
             return '(empty)'
         keys = list(rows[0].keys())
@@ -123,15 +177,15 @@ class BaseApp:
         self.state.flags[key] = not current
         return self.state.flags[key]
 
-    def summarize_list(self, values: List[float]) -> Dict[str, Any]:
+    def summarize_list(self, values: List[float]) -> Summary:
         if not values:
-            return {'count': 0, 'min': 0, 'max': 0, 'avg': 0}
-        return {
-            'count': len(values),
-            'min': min(values),
-            'max': max(values),
-            'avg': round(sum(values) / len(values), 4),
-        }
+            return Summary()
+        return Summary(
+            count=len(values),
+            min_val=min(values),
+            max_val=max(values),
+            avg=round(sum(values) / len(values), 4),
+        )
 
     def stats_from_numbers(self, values: List[float]) -> Dict[str, Any]:
         if not values:
@@ -170,24 +224,26 @@ class BaseApp:
         print(self.format_kv('History entries', len(self.state.history)))
         self.log(f'Exported to {self.export_state()}')
 
-    def demo_data(self) -> List[Dict[str, Any]]:
+    def demo_data(self) -> List[DataPoint]:
         return [
-            {'name': 'alpha', 'value': 1, 'active': True},
-            {'name': 'beta', 'value': 2, 'active': False},
-            {'name': 'gamma', 'value': 3, 'active': True},
+            DataPoint(name='alpha', value=1, active=True),
+            DataPoint(name='beta', value=2, active=False),
+            DataPoint(name='gamma', value=3, active=True),
         ]
 
-    def dataset(self) -> List[Dict[str, Any]]:
+    def dataset(self) -> List[DataPoint]:
         return self.demo_data()
 
-    def process_dataset(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
-        active = [item for item in items if item.get('active', False)]
-        values = [item.get('value', 0) for item in active]
-        return {
-            'total_items': len(items),
-            'active_items': len(active),
-            'summary': self.summarize_list(values),
-        }
+    def process_dataset(self, items: List[Dict[str, Any] | DataPoint]) -> Dict[str, Any]:
+        typed = [DataPoint.from_dict(i) if isinstance(i, dict) else i for i in items]
+        active = [item for item in typed if item.active]
+        values = [item.value for item in active]
+        summary = self.summarize_list(values) if values else Summary()
+        return DatasetResult(
+            total_items=len(items),
+            active_items=len(active),
+            summary=summary,
+        ).to_dict()
 
     def finalize(self) -> None:
         self.export_state()
