@@ -94,7 +94,18 @@ class BaseApp:
 
     def save_json(self, name: str, payload: Dict[str, Any]) -> Path:
         path = self.output_dir / name
-        path.write_text(json.dumps(payload, indent=2, default=str), encoding='utf-8')
+        tmp = path.with_suffix(path.suffix + '.tmp')
+        try:
+            with tmp.open('w', encoding='utf-8') as f:
+                json.dump(payload, f, indent=2, default=str)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            raise
+        try:
+            os.replace(tmp, path)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            raise
         return path
 
     def load_json(self, path: Path) -> Dict[str, Any]:
@@ -107,7 +118,18 @@ class BaseApp:
 
     def save_text(self, name: str, content: str) -> Path:
         path = self.output_dir / name
-        path.write_text(content, encoding='utf-8')
+        tmp = path.with_suffix(path.suffix + '.tmp')
+        try:
+            with tmp.open('w', encoding='utf-8') as f:
+                f.write(content)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            raise
+        try:
+            os.replace(tmp, path)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            raise
         return path
 
     def load_text(self, path: Path) -> str:
