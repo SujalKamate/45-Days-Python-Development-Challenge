@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Optional, Tuple
 import json
 import math
 import os
 import random
 import statistics
+import threading
 import time
 
 
@@ -20,6 +22,20 @@ class BaseAppState:
     created_at: datetime = field(default_factory=datetime.utcnow)
     runs: int = 0
     errors: int = 0
+    perf_metrics: Dict[str, List[float]] = field(default_factory=dict)
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+    _next_id: int = 0
+
+
+class _OutputProxy:
+    def __init__(self, app: BaseApp) -> None:
+        self._app = app
+
+    def section(self, title: str) -> None:
+        self._app.section(title)
+
+    def kv(self, key: str, value: Any) -> None:
+        print(self._app.format_kv(key, value))
 
 
 class BaseApp:
@@ -29,6 +45,9 @@ class BaseApp:
         self.output_dir.mkdir(exist_ok=True)
         self.seed = 42
         random.seed(self.seed)
+        self.output = _OutputProxy(self)
+        self._tasks: Dict[str, Any] = {}
+        self._next_id: int = 0
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -161,6 +180,24 @@ class BaseApp:
         }
         return self.save_json('state.json', payload)
 
+    @contextmanager
+    def _time_it(self, label: str) -> Generator[None, None, None]:
+        start = time.perf_counter()
+        try:
+            yield
+        finally:
+            elapsed = time.perf_counter() - start
+            self.state.perf_metrics.setdefault(label, []).append(round(elapsed, 6))
+
+    def report_metrics(self) -> None:
+        if not self.state.perf_metrics:
+            return
+        self.section('Performance Metrics')
+        for label, timings in sorted(self.state.perf_metrics.items()):
+            avg = sum(timings) / len(timings)
+            total = sum(timings)
+            print(self.format_kv(label, f'{avg*1000:.1f}ms avg ({total*1000:.1f}ms total, {len(timings)} call(s))'))
+
     def display_report(self) -> None:
         self.section('Summary')
         print(self.format_kv('Runs', self.state.runs))
@@ -189,6 +226,19 @@ class BaseApp:
             'summary': self.summarize_list(values),
         }
 
+    def run(self) -> None:
+        self.state.runs += 1
+        self.section('Processing')
+        with self._time_it('dataset'):
+            items = self.dataset()
+        with self._time_it('process_dataset'):
+            result = self.process_dataset(items)
+        self.record('result', result)
+        print(json.dumps(result, indent=2))
+        self.display_report()
+        self.report_metrics()
+
     def finalize(self) -> None:
-        self.export_state()
+        with self._time_it('export_state'):
+            self.export_state()
         self.log('Finalized successfully')
