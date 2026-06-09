@@ -8,6 +8,7 @@ import json
 import time
 
 class EncryptionDecryptionApp(BaseApp):
+    def process_dataset(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
         def caesar(text: str, s: int) -> str:
             res = []
             for char in text:
