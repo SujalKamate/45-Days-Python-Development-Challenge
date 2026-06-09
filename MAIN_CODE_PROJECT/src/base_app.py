@@ -10,6 +10,7 @@ import os
 import random
 import statistics
 import time
+import unicodedata
 
 
 @dataclass
@@ -63,13 +64,16 @@ class BaseApp:
         return max(low, min(high, value))
 
     def normalize_text(self, value: str) -> str:
-        return ' '.join(str(value).strip().split())
+        return ' '.join(unicodedata.normalize('NFKC', str(value)).strip().split())
 
     def normalize_key(self, value: str) -> str:
         return self.normalize_text(value).lower().replace(' ', '_')
 
     def split_words(self, value: str) -> List[str]:
-        cleaned = ''.join(ch.lower() if ch.isalnum() else ' ' for ch in value)
+        cleaned = ''.join(
+            ch.lower() if ch.isalnum() else ' '
+            for ch in unicodedata.normalize('NFKC', str(value))
+        )
         return [part for part in cleaned.split() if part]
 
     def chunk(self, items: List[Any], size: int) -> List[List[Any]]:
