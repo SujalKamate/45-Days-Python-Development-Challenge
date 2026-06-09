@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+import hashlib
 import json
 import math
 import os
@@ -150,6 +151,11 @@ class BaseApp:
     def history_tail(self, count: int = 5) -> List[str]:
         return self.state.history[-count:]
 
+    @staticmethod
+    def _compute_checksum(data: Dict[str, Any]) -> str:
+        canonical = json.dumps(data, sort_keys=True, default=str)
+        return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
     def export_state(self) -> Path:
         payload = {
             'created_at': self.state.created_at,
@@ -159,7 +165,22 @@ class BaseApp:
             'flags': self.state.flags,
             'history': self.history_tail(10),
         }
+        payload['_checksum'] = self._compute_checksum(payload)
         return self.save_json('state.json', payload)
+
+    def verify_state(self, path: Optional[Path] = None) -> bool:
+        path = path or self.output_dir / 'state.json'
+        if not path.exists():
+            return True
+        try:
+            data = json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            return False
+        stored = data.pop('_checksum', None)
+        if stored is None:
+            return True
+        expected = self._compute_checksum(data)
+        return stored == expected
 
     def display_report(self) -> None:
         self.section('Summary')
@@ -190,5 +211,8 @@ class BaseApp:
         }
 
     def finalize(self) -> None:
-        self.export_state()
-        self.log('Finalized successfully')
+        path = self.export_state()
+        if not self.verify_state(path):
+            self.log('WARNING: state file integrity check failed after save')
+        else:
+            self.log('Finalized successfully')
