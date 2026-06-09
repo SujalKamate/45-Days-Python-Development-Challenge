@@ -11,6 +11,8 @@ import random
 import statistics
 import time
 
+from network_client import NetworkClient
+
 
 @dataclass
 class BaseAppState:
@@ -27,6 +29,7 @@ class BaseApp:
         self.state = BaseAppState()
         self.output_dir = Path('outputs')
         self.output_dir.mkdir(exist_ok=True)
+        self.net = NetworkClient()
         self.seed = 42
         random.seed(self.seed)
 
