@@ -11,6 +11,8 @@ import random
 import statistics
 import time
 
+from drift_timer import DriftCorrectedTimer, Stopwatch
+
 
 @dataclass
 class BaseAppState:
@@ -27,6 +29,7 @@ class BaseApp:
         self.state = BaseAppState()
         self.output_dir = Path('outputs')
         self.output_dir.mkdir(exist_ok=True)
+        self.timer = DriftCorrectedTimer()
         self.seed = 42
         random.seed(self.seed)
 
