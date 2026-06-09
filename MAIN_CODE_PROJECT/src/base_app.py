@@ -9,6 +9,7 @@ import math
 import os
 import random
 import statistics
+import threading
 import time
 
 
@@ -20,6 +21,7 @@ class BaseAppState:
     created_at: datetime = field(default_factory=datetime.utcnow)
     runs: int = 0
     errors: int = 0
+    _lock: threading.Lock = field(default_factory=threading.Lock, compare=False, repr=False)
 
 
 class BaseApp:
