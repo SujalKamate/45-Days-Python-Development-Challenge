@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+import copy
 import json
 import math
 import os
@@ -116,7 +117,7 @@ class BaseApp:
         return path.read_text(encoding='utf-8')
 
     def record(self, key: str, value: Any) -> None:
-        self.state.records[key] = value
+        self.state.records[key] = copy.deepcopy(value)
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
@@ -155,9 +156,9 @@ class BaseApp:
             'created_at': self.state.created_at,
             'runs': self.state.runs,
             'errors': self.state.errors,
-            'records': self.state.records,
-            'flags': self.state.flags,
-            'history': self.history_tail(10),
+            'records': copy.deepcopy(self.state.records),
+            'flags': copy.deepcopy(self.state.flags),
+            'history': copy.deepcopy(self.history_tail(10)),
         }
         return self.save_json('state.json', payload)
 
