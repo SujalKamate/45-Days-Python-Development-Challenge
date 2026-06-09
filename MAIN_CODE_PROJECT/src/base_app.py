@@ -47,17 +47,23 @@ class BaseApp:
     def non_empty(self, value: Any) -> bool:
         return bool(str(value).strip())
 
-    def safe_int(self, value: Any, default: int = 0) -> int:
-        try:
-            return int(str(value).strip())
-        except Exception:
-            return default
+    def safe_int(self, value: Any, default: int = 0) -> int | None:
+        from null_safe import null_safe_int
+        result = null_safe_int(value)
+        return default if result is None else result
 
-    def safe_float(self, value: Any, default: float = 0.0) -> float:
-        try:
-            return float(str(value).strip())
-        except Exception:
-            return default
+    def safe_int_or_none(self, value: Any) -> int | None:
+        from null_safe import null_safe_int
+        return null_safe_int(value)
+
+    def safe_float(self, value: Any, default: float = 0.0) -> float | None:
+        from null_safe import null_safe_float
+        result = null_safe_float(value)
+        return default if result is None else result
+
+    def safe_float_or_none(self, value: Any) -> float | None:
+        from null_safe import null_safe_float
+        return null_safe_float(value)
 
     def clamp(self, value: float, low: float, high: float) -> float:
         return max(low, min(high, value))
