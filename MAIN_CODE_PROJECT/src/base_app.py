@@ -11,6 +11,8 @@ import random
 import statistics
 import time
 
+from decimal_utils import Money, safe_decimal
+
 
 @dataclass
 class BaseAppState:
@@ -58,6 +60,10 @@ class BaseApp:
             return float(str(value).strip())
         except Exception:
             return default
+
+    def safe_money(self, value: str | int | float) -> Money:
+        """Convert *value* to an exact ``Money`` instance."""
+        return Money(value)
 
     def clamp(self, value: float, low: float, high: float) -> float:
         return max(low, min(high, value))
