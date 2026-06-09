@@ -20,6 +20,7 @@ class BaseAppState:
     created_at: datetime = field(default_factory=datetime.utcnow)
     runs: int = 0
     errors: int = 0
+    max_history: int = 1000
 
 
 class BaseApp:
@@ -36,7 +37,15 @@ class BaseApp:
         stamp = datetime.now().strftime('%H:%M:%S')
         entry = f'[{stamp}] {message}'
         self.state.history.append(entry)
+        if len(self.state.history) > self.state.max_history:
+            self.state.history[:len(self.state.history) - self.state.max_history] = []
         print(entry)
+
+    def rotate_logs(self, keep: int = 50) -> None:
+        from pathlib import Path
+        logs = sorted(Path(self.output_dir).glob('*.json*'))
+        for p in logs[:-keep]:
+            p.unlink()
 
     def section(self, title: str) -> None:
         print()
