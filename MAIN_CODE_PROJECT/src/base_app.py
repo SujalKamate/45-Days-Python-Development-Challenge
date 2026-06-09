@@ -11,6 +11,8 @@ import random
 import statistics
 import time
 
+from file_manager import FileManager
+
 
 @dataclass
 class BaseAppState:
@@ -94,26 +96,25 @@ class BaseApp:
 
     def save_json(self, name: str, payload: Dict[str, Any]) -> Path:
         path = self.output_dir / name
-        path.write_text(json.dumps(payload, indent=2, default=str), encoding='utf-8')
+        FileManager.write_json(path, payload)
         return path
 
     def load_json(self, path: Path) -> Dict[str, Any]:
-        if not path.exists():
-            return {}
         try:
-            return json.loads(path.read_text(encoding='utf-8'))
+            return FileManager.read_json(path)
         except Exception:
             return {}
 
     def save_text(self, name: str, content: str) -> Path:
         path = self.output_dir / name
-        path.write_text(content, encoding='utf-8')
+        FileManager.write_text(path, content)
         return path
 
     def load_text(self, path: Path) -> str:
-        if not path.exists():
+        try:
+            return FileManager.read_text(path)
+        except Exception:
             return ''
-        return path.read_text(encoding='utf-8')
 
     def record(self, key: str, value: Any) -> None:
         self.state.records[key] = value
