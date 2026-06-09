@@ -8,6 +8,7 @@ import json
 import time
 
 class EncryptionDecryptionApp(BaseApp):
+    def process_dataset(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
         def caesar(text: str, s: int) -> str:
             res = []
             for char in text:
@@ -17,7 +18,7 @@ class EncryptionDecryptionApp(BaseApp):
                 else:
                     res.append(char)
             return "".join(res)
-        
+
         runs = []
         for item in items:
             msg = item.get('message', '')

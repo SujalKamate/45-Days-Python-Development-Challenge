@@ -118,10 +118,9 @@ class CliCalculatorApp(BaseApp):
             return [self.normalize_text(str(x)) for x in value]
         return value
 
-                with self.state._lock:
-                    self.state.errors += 1
-                print(self.format_kv(item, f'error: {exc}'))
-        self.display_report()
+    def display_report(self) -> None:
+        super().display_report()
+
 def main() -> None:
     app = CliCalculatorApp()
     try:
