@@ -17,7 +17,7 @@ class TestProjectConfiguration:
         """Test that environment.yml has proper content"""
         project_root = Path(__file__).parent.parent.parent
         env_file = project_root / "environment.yml"
-        content = env_file.read_text()
+        content = env_file.read_text(encoding='utf-8')
         assert "python" in content.lower(), "environment.yml should specify python"
         assert "pytest" in content.lower(), "environment.yml should include pytest"
 
