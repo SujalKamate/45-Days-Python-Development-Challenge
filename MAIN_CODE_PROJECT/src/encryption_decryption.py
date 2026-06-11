@@ -18,7 +18,7 @@ class EncryptionDecryptionApp(BaseApp):
                 else:
                     res.append(char)
             return "".join(res)
-        
+
         runs = []
         for item in items:
             msg = item.get('message', '')
