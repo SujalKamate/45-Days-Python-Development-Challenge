@@ -18,6 +18,8 @@ from json_depth_guard import safe_json_loads
 
 from decimal_utils import Money, safe_decimal
 
+from drift_timer import DriftCorrectedTimer, Stopwatch
+
 
 @dataclass
 class BaseAppState:
@@ -35,7 +37,8 @@ class BaseApp:
         self.state = BaseAppState()
         self.output_dir = Path('outputs')
         self.output_dir.mkdir(exist_ok=True)
-        self.seed = seed
+        self.timer = DriftCorrectedTimer()
+        self.seed = 42
         random.seed(self.seed)
 
     # ── Logging / state mutation helpers ───────────────────────────────
