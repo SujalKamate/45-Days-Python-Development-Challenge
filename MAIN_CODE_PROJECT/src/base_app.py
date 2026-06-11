@@ -11,6 +11,8 @@ import random
 import statistics
 import time
 
+from resource_guard import ResourceGuard
+
 
 @dataclass
 class BaseAppState:
@@ -20,6 +22,7 @@ class BaseAppState:
     created_at: datetime = field(default_factory=datetime.utcnow)
     runs: int = 0
     errors: int = 0
+    max_history: int = 1000
 
 
 class BaseApp:
@@ -27,6 +30,7 @@ class BaseApp:
         self.state = BaseAppState()
         self.output_dir = Path('outputs')
         self.output_dir.mkdir(exist_ok=True)
+        self._guard = ResourceGuard(type(self).__name__, self.output_dir)
         self.seed = 42
         random.seed(self.seed)
 
@@ -36,6 +40,8 @@ class BaseApp:
         stamp = datetime.now().strftime('%H:%M:%S')
         entry = f'[{stamp}] {message}'
         self.state.history.append(entry)
+        if len(self.state.history) > self.state.max_history:
+            del self.state.history[:len(self.state.history) - self.state.max_history]
         print(entry)
 
     def section(self, title: str) -> None:
@@ -47,17 +53,11 @@ class BaseApp:
     def non_empty(self, value: Any) -> bool:
         return bool(str(value).strip())
 
-    def safe_int(self, value: Any, default: int = 0) -> int:
-        try:
-            return int(str(value).strip())
-        except Exception:
-            return default
+    def safe_int(self, value: Any) -> int:
+        return int(str(value).strip())
 
-    def safe_float(self, value: Any, default: float = 0.0) -> float:
-        try:
-            return float(str(value).strip())
-        except Exception:
-            return default
+    def safe_float(self, value: Any) -> float:
+        return float(str(value).strip())
 
     def clamp(self, value: float, low: float, high: float) -> float:
         return max(low, min(high, value))
@@ -93,49 +93,28 @@ class BaseApp:
     # ── File I/O helpers ────────────────────────────────────────────────
 
     def save_json(self, name: str, payload: Dict[str, Any]) -> Path:
-        path = self.output_dir / name
-        tmp = path.with_suffix(path.suffix + '.tmp')
-        try:
-            with tmp.open('w', encoding='utf-8') as f:
-                json.dump(payload, f, indent=2, default=str)
-        except OSError:
-            tmp.unlink(missing_ok=True)
-            raise
-        try:
-            os.replace(tmp, path)
-        except OSError:
-            tmp.unlink(missing_ok=True)
-            raise
+        path = self.output_dir / self._guard.qualify(name)
+        path.write_text(json.dumps(payload, indent=2, default=str), encoding='utf-8')
         return path
 
     def load_json(self, path: Path) -> Dict[str, Any]:
+        self._guard.check_path(path)
         if not path.exists():
             return {}
         try:
-            return json.loads(path.read_text(encoding='utf-8'))
+            return FileManager.read_json(path)
         except Exception:
             return {}
 
     def save_text(self, name: str, content: str) -> Path:
-        path = self.output_dir / name
-        tmp = path.with_suffix(path.suffix + '.tmp')
-        try:
-            with tmp.open('w', encoding='utf-8') as f:
-                f.write(content)
-        except OSError:
-            tmp.unlink(missing_ok=True)
-            raise
-        try:
-            os.replace(tmp, path)
-        except OSError:
-            tmp.unlink(missing_ok=True)
-            raise
+        path = self.output_dir / self._guard.qualify(name)
+        path.write_text(content, encoding='utf-8')
         return path
 
     def load_text(self, path: Path) -> str:
+        self._guard.check_path(path)
         if not path.exists():
             return ''
-        return path.read_text(encoding='utf-8')
 
     def record(self, key: str, value: Any) -> None:
         self.state.records[key] = value
