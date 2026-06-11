@@ -8,6 +8,7 @@ import json
 import time
 
 class TicTacToeApp(BaseApp):
+    def process_dataset(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
         def check_winner(b: List[str]) -> Optional[str]:
             win_indices = [
                 (0, 1, 2), (3, 4, 5), (6, 7, 8),

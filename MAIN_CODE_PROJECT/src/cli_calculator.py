@@ -14,15 +14,19 @@ class CliCalculatorApp(BaseApp):
         parts = text.split()
         if len(parts) != 3:
             raise ValueError('format: number operator number')
-        return float(parts[0]), parts[1], float(parts[2])
+        from numeric_guard import safe_float as _sf
+        return _sf(parts[0]), parts[1], _sf(parts[2])
 
     def compute(self, a: float, op: str, b: float) -> float:
+        from numeric_guard import guard_power
+        if op == '**':
+            guard_power(a, b)
         operations = {
             '+': a + b,
             '-': a - b,
             '*': a * b,
-            '/': a / b if b != 0 else math.nan,
-            '%': a % b if b != 0 else math.nan,
+            '/': a / b if b != 0 else 0.0,
+            '%': a % b if b != 0 else 0.0,
             '**': a ** b,
         }
         if op not in operations:
@@ -38,12 +42,12 @@ class CliCalculatorApp(BaseApp):
         self.state.runs += 1
         self.reset()
         samples = ['5 + 2', '8 / 0', '4 ** 3', '10 ? 2']
-        self.output.section('Calculator Runs')
+        self.section('Calculator Runs')
         for item in samples:
             try:
                 a, op, b = self.parse_expression(item)
                 result = self.compute(a, op, b)
-                self.output.kv(item, result)
+                print(self.format_kv(item, result))
             except Exception as exc:
                 self.state.errors += 1
                 print(self.format_kv(item, f'error: {exc}'))
@@ -118,10 +122,6 @@ class CliCalculatorApp(BaseApp):
             return [self.normalize_text(str(x)) for x in value]
         return value
 
-                with self.state._lock:
-                    self.state.errors += 1
-                print(self.format_kv(item, f'error: {exc}'))
-        self.display_report()
 def main() -> None:
     app = CliCalculatorApp()
     try:
