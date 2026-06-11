@@ -1,9 +1,4 @@
-"""src package — makes all source modules importable from any working directory.
-
-Ensures that direct imports (``from base_app import ...``) used by the 50
-source modules resolve correctly regardless of the current working directory
-or ``sys.path`` configuration at interpreter startup.
-"""
+"""src package — ensures source modules are importable from any working directory."""
 
 from __future__ import annotations
 
