@@ -58,7 +58,8 @@ class JsonValidatorApp:
                 "tags": ["security", "json"]
             }
         }
-        assert validate_schema(sample_data, schema)
+        validation_errors = validate_schema(sample_data, schema)
+        assert not validation_errors, f"Self-test failed: {validation_errors}"
         self.log("Self-test passed")
 
     def demo_data(self) -> List[Dict[str, Any]]:
@@ -69,15 +70,23 @@ class JsonValidatorApp:
     def process_dataset(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
         results = []
         for item in items:
+            if not isinstance(item, dict):
+                results.append({"valid": False, "errors": ["Item is not a dict"]})
+                continue
             data = item.get("data")
             schema = item.get("schema")
-            valid = validate_schema(data, schema)
-            results.append({"valid": valid})
+            if schema is None:
+                results.append({"valid": False, "errors": ["Missing 'schema' field"]})
+                continue
+            errors = validate_schema(data, schema)
+            results.append({"valid": not errors, "errors": errors})
         return {"results": results}
 
 
-def validate_schema(data: Any, schema: Any) -> bool:
+def validate_schema(data: Any, schema: Any, _path: str = "$") -> List[str]:
     """Validate structure and type constraints recursively.
+
+    Returns a list of error messages (empty = valid).
 
     Supports:
     - Basic types (int, str, float, bool, etc.)
@@ -85,34 +94,46 @@ def validate_schema(data: Any, schema: Any) -> bool:
     - Dicts (recursive verification of keys and their value schemas)
     - Lists (verifies all elements in list match the list's element schema)
     """
+    errors: List[str] = []
+
     if isinstance(schema, dict):
         if not isinstance(data, dict):
-            return False
+            return [f"{_path}: expected dict, got {type(data).__name__}"]
         for key, expected_schema in schema.items():
+            child_path = f"{_path}.{key}"
             if key not in data:
-                return False
-            if not validate_schema(data[key], expected_schema):
-                return False
-        return True
-    elif isinstance(schema, list):
+                errors.append(f"{child_path}: missing required key")
+            else:
+                errors.extend(validate_schema(data[key], expected_schema, child_path))
+        return errors
+
+    if isinstance(schema, list):
         if not isinstance(data, list):
-            return False
+            return [f"{_path}: expected list, got {type(data).__name__}"]
         if len(schema) > 0:
             item_schema = schema[0]
-            for item in data:
-                if not validate_schema(item, item_schema):
-                    return False
-        return True
-    elif isinstance(schema, type):
+            for i, item in enumerate(data):
+                child_path = f"{_path}[{i}]"
+                errors.extend(validate_schema(item, item_schema, child_path))
+        return errors
+
+    if isinstance(schema, type):
         if schema is int and type(data) is bool:
-            return False
-        return isinstance(data, schema)
-    elif isinstance(schema, tuple):
+            return [f"{_path}: expected int, got bool"]
+        if not isinstance(data, schema):
+            return [f"{_path}: expected {schema.__name__}, got {type(data).__name__}"]
+        return []
+
+    if isinstance(schema, tuple):
         if int in schema and type(data) is bool:
             if bool not in schema:
-                return False
-        return isinstance(data, schema)
-    return False
+                return [f"{_path}: expected int/float, got bool"]
+        if not isinstance(data, schema):
+            type_names = "|".join(t.__name__ for t in schema)
+            return [f"{_path}: expected {type_names}, got {type(data).__name__}"]
+        return []
+
+    return [f"{_path}: unsupported schema {schema!r}"]
 
 
 def generate_checksum(content: str) -> str:
@@ -206,8 +227,10 @@ def safe_load_json(
             raise ValueError(f"Integrity verification failed. Inline checksum mismatch")
 
     # 4. Schema Enforcement
-    if schema is not None and not validate_schema(data, schema):
-        raise ValueError(f"Schema validation failed for {path}")
+    if schema is not None:
+        schema_errors = validate_schema(data, schema)
+        if schema_errors:
+            raise ValueError(f"Schema validation failed for {path}:\n" + "\n".join(schema_errors))
 
     return data
 
