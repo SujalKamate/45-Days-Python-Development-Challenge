@@ -8,6 +8,26 @@ import json
 import time
 
 class SystemMonitorApp(BaseApp):
+    def process_dataset(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+        import time
+        cycles = max(1, min(len(items), 100))
+        snapshots = []
+        for i in range(cycles):
+            self.log(f'Polling cycle {i+1}/{cycles}')
+            item = items[i] if i < len(items) else {}
+            snapshots.append({
+                'cycle': i + 1,
+                'cpu': item.get('cpu', 0),
+                'memory': item.get('memory', 0),
+            })
+            time.sleep(0.001)
+        self.rotate_logs(keep=10)
+        return {
+            'cycles_completed': cycles,
+            'snapshots': snapshots,
+            'log_entries': len(self.state.history),
+        }
+
     def run(self) -> None:
         self.state.runs += 1
         self.section('Processing')
