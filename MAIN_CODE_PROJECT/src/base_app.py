@@ -16,6 +16,8 @@ from resource_guard import ResourceGuard
 
 from json_depth_guard import safe_json_loads
 
+from decimal_utils import Money, safe_decimal
+
 
 @dataclass
 class BaseAppState:
@@ -61,6 +63,10 @@ class BaseApp:
 
     def safe_float(self, value: Any) -> float:
         return float(str(value).strip())
+
+    def safe_money(self, value: str | int | float) -> Money:
+        """Convert *value* to an exact ``Money`` instance."""
+        return Money(value)
 
     def clamp(self, value: float, low: float, high: float) -> float:
         return max(low, min(high, value))
