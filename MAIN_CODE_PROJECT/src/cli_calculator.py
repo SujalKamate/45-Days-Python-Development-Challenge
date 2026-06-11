@@ -122,6 +122,9 @@ class CliCalculatorApp(BaseApp):
             return [self.normalize_text(str(x)) for x in value]
         return value
 
+    def display_report(self) -> None:
+        super().display_report()
+
 def main() -> None:
     app = CliCalculatorApp()
     try:
