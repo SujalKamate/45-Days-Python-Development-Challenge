@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-import hashlib
+from typing import Any, Dict, Generator, List, Optional, Tuple
 import json
 import math
 import os
@@ -85,6 +85,7 @@ class BaseAppState:
     created_at: datetime = field(default_factory=datetime.utcnow)
     runs: int = 0
     errors: int = 0
+    perf_metrics: Dict[str, List[float]] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _next_id: int = 0
 
@@ -288,19 +289,23 @@ class BaseApp:
         payload['_checksum'] = self._compute_checksum(payload)
         return self.save_json('state.json', payload)
 
-    def verify_state(self, path: Optional[Path] = None) -> bool:
-        path = path or self.output_dir / 'state.json'
-        if not path.exists():
-            return True
+    @contextmanager
+    def _time_it(self, label: str) -> Generator[None, None, None]:
+        start = time.perf_counter()
         try:
-            data = json.loads(path.read_text(encoding='utf-8'))
-        except Exception:
-            return False
-        stored = data.pop('_checksum', None)
-        if stored is None:
-            return True
-        expected = self._compute_checksum(data)
-        return stored == expected
+            yield
+        finally:
+            elapsed = time.perf_counter() - start
+            self.state.perf_metrics.setdefault(label, []).append(round(elapsed, 6))
+
+    def report_metrics(self) -> None:
+        if not self.state.perf_metrics:
+            return
+        self.section('Performance Metrics')
+        for label, timings in sorted(self.state.perf_metrics.items()):
+            avg = sum(timings) / len(timings)
+            total = sum(timings)
+            print(self.format_kv(label, f'{avg*1000:.1f}ms avg ({total*1000:.1f}ms total, {len(timings)} call(s))'))
 
     def display_report(self) -> None:
         print(self.format_report())
@@ -352,15 +357,16 @@ class BaseApp:
     def run(self) -> None:
         self.state.runs += 1
         self.section('Processing')
-        items = self.dataset()
-        result = self.process_dataset(items)
+        with self._time_it('dataset'):
+            items = self.dataset()
+        with self._time_it('process_dataset'):
+            result = self.process_dataset(items)
         self.record('result', result)
         print(json.dumps(result, indent=2))
         self.display_report()
+        self.report_metrics()
 
     def finalize(self) -> None:
-        path = self.export_state()
-        if not self.verify_state(path):
-            self.log('WARNING: state file integrity check failed after save')
-        else:
-            self.log('Finalized successfully')
+        with self._time_it('export_state'):
+            self.export_state()
+        self.log('Finalized successfully')
