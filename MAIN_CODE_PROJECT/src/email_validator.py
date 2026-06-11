@@ -8,6 +8,55 @@ import json
 import time
 
 class EmailValidatorApp(BaseApp):
+    def process_dataset(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+        import re
+
+        EMAIL_REGEX = re.compile(
+            r'^[a-zA-Z0-9.!#$%&\'*+/=?^_`{|}~-]+@'
+            r'[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?'
+            r'(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$'
+        )
+
+        def normalize_domain(domain: str) -> str:
+            try:
+                return domain.encode('idna').decode('ascii')
+            except (UnicodeError, ValueError):
+                return domain
+
+        def validate_email(email: str) -> tuple:
+            if not email or '@' not in email:
+                return False, 'Missing @ sign'
+            local, _, domain = email.partition('@')
+            if not local:
+                return False, 'Empty local part'
+            if not domain:
+                return False, 'Empty domain'
+            normalized_domain = normalize_domain(domain)
+            normalized_email = f'{local}@{normalized_domain}'
+            if not EMAIL_REGEX.match(normalized_email):
+                return False, 'Format mismatch after IDN normalization'
+            return True, None
+
+        results = []
+        for item in items:
+            email = item.get('email', '')
+            valid, reason = validate_email(email)
+            entry: Dict[str, Any] = {
+                'email': email,
+                'valid': valid,
+                'reason': reason,
+            }
+            if email and '@' in email:
+                entry['normalized_domain'] = normalize_domain(email.split('@', 1)[1])
+            else:
+                entry['normalized_domain'] = None
+            results.append(entry)
+
+        return {
+            'emails_analyzed': len(items),
+            'results': results,
+        }
+
     def run(self) -> None:
         self.state.runs += 1
         self.section('Processing')
