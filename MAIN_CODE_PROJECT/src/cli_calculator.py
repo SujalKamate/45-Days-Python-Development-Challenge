@@ -42,12 +42,12 @@ class CliCalculatorApp(BaseApp):
         self.state.runs += 1
         self.reset()
         samples = ['5 + 2', '8 / 0', '4 ** 3', '10 ? 2']
-        self.output.section('Calculator Runs')
+        self.section('Calculator Runs')
         for item in samples:
             try:
                 a, op, b = self.parse_expression(item)
                 result = self.compute(a, op, b)
-                self.output.kv(item, result)
+                print(self.format_kv(item, result))
             except Exception as exc:
                 self.state.errors += 1
                 print(self.format_kv(item, f'error: {exc}'))
