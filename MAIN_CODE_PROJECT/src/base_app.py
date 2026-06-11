@@ -31,12 +31,11 @@ class BaseAppState:
 
 
 class BaseApp:
-    def __init__(self) -> None:
+    def __init__(self, seed: int | None = None) -> None:
         self.state = BaseAppState()
         self.output_dir = Path('outputs')
         self.output_dir.mkdir(exist_ok=True)
-        self._guard = ResourceGuard(type(self).__name__, self.output_dir)
-        self.seed = 42
+        self.seed = seed
         random.seed(self.seed)
 
     # ── Logging / state mutation helpers ───────────────────────────────
