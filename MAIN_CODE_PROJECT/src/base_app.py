@@ -14,6 +14,8 @@ import unicodedata
 
 from resource_guard import ResourceGuard
 
+from json_depth_guard import safe_json_loads
+
 
 @dataclass
 class BaseAppState:
