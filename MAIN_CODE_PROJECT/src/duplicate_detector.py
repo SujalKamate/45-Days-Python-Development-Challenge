@@ -10,9 +10,15 @@ import time
 class DuplicateDetectorApp(BaseApp):
     def run(self) -> None:
         self.state.runs += 1
-        self.section('Processing')
+        self.section('Duplicate Detection')
         items = self.dataset()
         result = self.process_dataset(items)
+        dups = self.find_duplicates(items)
+        if dups:
+            result['duplicates_found'] = len(dups)
+            result['duplicate_items'] = dups
+        else:
+            result['duplicates_found'] = 0
         self.record('result', result)
         print(json.dumps(result, indent=2))
         self.display_report()
