@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-import copy
+import hashlib
 import json
 import math
 import os
@@ -235,6 +235,11 @@ class BaseApp:
     def history_tail(self, count: int = 5) -> List[str]:
         return self.state.history[-count:]
 
+    @staticmethod
+    def _compute_checksum(data: Dict[str, Any]) -> str:
+        canonical = json.dumps(data, sort_keys=True, default=str)
+        return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
     def export_state(self) -> Path:
         payload = {
             'version': 1,
@@ -265,12 +270,22 @@ class BaseApp:
             'flags': len(self.state.flags),
             'history_entries': len(self.state.history),
         }
+        payload['_checksum'] = self._compute_checksum(payload)
+        return self.save_json('state.json', payload)
 
-    def format_report(self) -> str:
-        lines = ['', '=' * 70, 'Summary', '=' * 70]
-        for k, v in self._report_data().items():
-            lines.append(self.format_kv(k.replace('_', ' ').title(), v))
-        return '\n'.join(lines)
+    def verify_state(self, path: Optional[Path] = None) -> bool:
+        path = path or self.output_dir / 'state.json'
+        if not path.exists():
+            return True
+        try:
+            data = json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            return False
+        stored = data.pop('_checksum', None)
+        if stored is None:
+            return True
+        expected = self._compute_checksum(data)
+        return stored == expected
 
     def display_report(self) -> None:
         print(self.format_report())
@@ -320,6 +335,8 @@ class BaseApp:
         return duplicates
 
     def finalize(self) -> None:
-        self.export_state()
-        self.on_shutdown()
-        self.log('Finalized successfully')
+        path = self.export_state()
+        if not self.verify_state(path):
+            self.log('WARNING: state file integrity check failed after save')
+        else:
+            self.log('Finalized successfully')
