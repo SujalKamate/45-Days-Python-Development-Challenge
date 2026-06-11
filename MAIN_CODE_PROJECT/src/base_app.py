@@ -237,6 +237,24 @@ class BaseApp:
     def dataset(self) -> List[Dict[str, Any]]:
         return self.demo_data()
 
+    # ── Lifecycle hooks ────────────────────────────────────────────────
+
+    def on_start(self) -> None:
+        """Hook called at the beginning of ``run()``. Override for startup logic."""
+
+    def on_shutdown(self) -> None:
+        """Hook called during ``finalize()``. Override for cleanup logic."""
+
+    def run(self) -> None:
+        self.on_start()
+        self.section('Processing')
+        items = self.dataset()
+        result = self.process_dataset(items)
+        self.record('result', result)
+        print(json.dumps(result, indent=2))
+        self.display_report()
+        self.finalize()
+
     def process_dataset(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
         active = [item for item in items if item.get('active', False)]
         values = [item.get('value', 0) for item in active]
@@ -270,4 +288,5 @@ class BaseApp:
 
     def finalize(self) -> None:
         self.export_state()
+        self.on_shutdown()
         self.log('Finalized successfully')
