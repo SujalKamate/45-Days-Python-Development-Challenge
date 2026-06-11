@@ -76,6 +76,11 @@ class DatasetResult:
             'summary': self.summary.to_dict() if self.summary else {},
         }
 
+try:
+    from .contracts import DataProvider, DataProcessor, AppRunner
+except ImportError:
+    from contracts import DataProvider, DataProcessor, AppRunner  # type: ignore[import-untyped]
+
 
 @dataclass
 class BaseAppState:
@@ -101,8 +106,8 @@ class _OutputProxy:
         print(self._app.format_kv(key, value))
 
 
-class BaseApp:
-    def __init__(self, seed: int | None = None) -> None:
+class BaseApp(DataProvider, DataProcessor, AppRunner):
+    def __init__(self) -> None:
         self.state = BaseAppState()
         self.output_dir = Path('outputs')
         self.output_dir.mkdir(exist_ok=True)
