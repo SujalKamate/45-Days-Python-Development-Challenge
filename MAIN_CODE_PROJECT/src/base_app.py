@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import copy
@@ -183,14 +183,40 @@ class BaseApp:
 
     def export_state(self) -> Path:
         payload = {
-            'created_at': self.state.created_at,
-            'runs': self.state.runs,
-            'errors': self.state.errors,
-            'records': copy.deepcopy(self.state.records),
-            'flags': copy.deepcopy(self.state.flags),
-            'history': copy.deepcopy(self.history_tail(10)),
+            'version': 1,
+            'exported_at': datetime.now(timezone.utc).isoformat(),
+            'app': {
+                'created_at': self.state.created_at.isoformat() if self.state.created_at else None,
+                'runs': self.state.runs,
+                'errors': self.state.errors,
+                'record_count': len(self.state.records),
+                'flag_count': len(self.state.flags),
+            },
+            'summary': {
+                'recent_history': self.history_tail(5),
+                'history_count': len(self.state.history),
+            },
+            'metadata': {
+                'records_summary': {k: self._describe_value(v) for k, v in list(self.state.records.items())[:20]},
+                'flags': dict(self.state.flags),
+            },
         }
         return self.save_json('state.json', payload)
+
+    def _describe_value(self, value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return {'type': 'dict', 'keys': list(value.keys())[:10], 'size': len(value)}
+        if isinstance(value, list):
+            return {'type': 'list', 'length': len(value)}
+        if isinstance(value, str):
+            return {'type': 'str', 'length': len(value)}
+        if isinstance(value, (int, float)):
+            return {'type': type(value).__name__, 'value': value}
+        if isinstance(value, bool):
+            return {'type': 'bool', 'value': value}
+        if value is None:
+            return {'type': 'null'}
+        return {'type': type(value).__name__}
 
     def display_report(self) -> None:
         self.section('Summary')
