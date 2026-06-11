@@ -105,7 +105,7 @@ class BaseApp:
         if not path.exists():
             return {}
         try:
-            return json.loads(path.read_text(encoding='utf-8'))
+            return FileManager.read_json(path)
         except Exception:
             return {}
 
@@ -118,7 +118,6 @@ class BaseApp:
         self._guard.check_path(path)
         if not path.exists():
             return ''
-        return path.read_text(encoding='utf-8')
 
     def record(self, key: str, value: Any) -> None:
         self.state.records[key] = value
