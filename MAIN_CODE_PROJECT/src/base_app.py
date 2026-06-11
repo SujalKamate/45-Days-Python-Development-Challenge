@@ -51,6 +51,12 @@ class BaseApp:
             del self.state.history[:len(self.state.history) - self.state.max_history]
         print(entry)
 
+    def rotate_logs(self, keep: int = 50) -> None:
+        from pathlib import Path
+        logs = sorted(Path(self.output_dir).glob('*.json*'))
+        for p in logs[:-keep]:
+            p.unlink()
+
     def section(self, title: str) -> None:
         print()
         print('=' * 70)
