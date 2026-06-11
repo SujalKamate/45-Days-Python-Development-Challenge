@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+import copy
 import json
 import math
 import os
@@ -11,6 +12,15 @@ import random
 import statistics
 import threading
 import time
+import unicodedata
+
+from resource_guard import ResourceGuard
+
+from json_depth_guard import safe_json_loads
+
+from decimal_utils import Money, safe_decimal
+
+from drift_timer import DriftCorrectedTimer, Stopwatch
 
 
 @dataclass
@@ -25,10 +35,11 @@ class BaseAppState:
 
 
 class BaseApp:
-    def __init__(self) -> None:
+    def __init__(self, seed: int | None = None) -> None:
         self.state = BaseAppState()
         self.output_dir = Path('outputs')
         self.output_dir.mkdir(exist_ok=True)
+        self.timer = DriftCorrectedTimer()
         self.seed = 42
         random.seed(self.seed)
 
@@ -38,7 +49,15 @@ class BaseApp:
         stamp = datetime.now().strftime('%H:%M:%S')
         entry = f'[{stamp}] {message}'
         self.state.history.append(entry)
+        if len(self.state.history) > self.state.max_history:
+            del self.state.history[:len(self.state.history) - self.state.max_history]
         print(entry)
+
+    def rotate_logs(self, keep: int = 50) -> None:
+        from pathlib import Path
+        logs = sorted(Path(self.output_dir).glob('*.json*'))
+        for p in logs[:-keep]:
+            p.unlink()
 
     def section(self, title: str) -> None:
         print()
@@ -47,31 +66,40 @@ class BaseApp:
         print('=' * 70)
 
     def non_empty(self, value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return value.strip() != ''
+        if isinstance(value, (list, tuple, dict, set)):
+            return len(value) > 0
+        if isinstance(value, (int, float)):
+            return value != 0
         return bool(str(value).strip())
 
-    def safe_int(self, value: Any, default: int = 0) -> int:
-        try:
-            return int(str(value).strip())
-        except Exception:
-            return default
+    def safe_int(self, value: Any) -> int:
+        return int(str(value).strip())
 
-    def safe_float(self, value: Any, default: float = 0.0) -> float:
-        try:
-            return float(str(value).strip())
-        except Exception:
-            return default
+    def safe_float(self, value: Any) -> float:
+        return float(str(value).strip())
+
+    def safe_money(self, value: str | int | float) -> Money:
+        """Convert *value* to an exact ``Money`` instance."""
+        return Money(value)
 
     def clamp(self, value: float, low: float, high: float) -> float:
         return max(low, min(high, value))
 
     def normalize_text(self, value: str) -> str:
-        return ' '.join(str(value).strip().split())
+        return ' '.join(unicodedata.normalize('NFKC', str(value)).strip().split())
 
     def normalize_key(self, value: str) -> str:
         return self.normalize_text(value).lower().replace(' ', '_')
 
     def split_words(self, value: str) -> List[str]:
-        cleaned = ''.join(ch.lower() if ch.isalnum() else ' ' for ch in value)
+        cleaned = ''.join(
+            ch.lower() if ch.isalnum() else ' '
+            for ch in unicodedata.normalize('NFKC', str(value))
+        )
         return [part for part in cleaned.split() if part]
 
     def chunk(self, items: List[Any], size: int) -> List[List[Any]]:
@@ -82,7 +110,7 @@ class BaseApp:
         return f'{key:<20} : {value}'
 
     def render_table(self, rows: List[Dict[str, Any]]) -> str:
-        if not rows:
+        if rows is None or not rows:
             return '(empty)'
         keys = list(rows[0].keys())
         widths = {k: max(len(k), max(len(str(row.get(k, ''))) for row in rows)) for k in keys}
@@ -95,30 +123,31 @@ class BaseApp:
     # ── File I/O helpers ────────────────────────────────────────────────
 
     def save_json(self, name: str, payload: Dict[str, Any]) -> Path:
-        path = self.output_dir / name
+        path = self.output_dir / self._guard.qualify(name)
         path.write_text(json.dumps(payload, indent=2, default=str), encoding='utf-8')
         return path
 
     def load_json(self, path: Path) -> Dict[str, Any]:
+        self._guard.check_path(path)
         if not path.exists():
             return {}
         try:
-            return json.loads(path.read_text(encoding='utf-8'))
+            return FileManager.read_json(path)
         except Exception:
             return {}
 
     def save_text(self, name: str, content: str) -> Path:
-        path = self.output_dir / name
+        path = self.output_dir / self._guard.qualify(name)
         path.write_text(content, encoding='utf-8')
         return path
 
     def load_text(self, path: Path) -> str:
+        self._guard.check_path(path)
         if not path.exists():
             return ''
-        return path.read_text(encoding='utf-8')
 
     def record(self, key: str, value: Any) -> None:
-        self.state.records[key] = value
+        self.state.records[key] = copy.deepcopy(value)
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
@@ -126,8 +155,8 @@ class BaseApp:
         return self.state.flags[key]
 
     def summarize_list(self, values: List[float]) -> Dict[str, Any]:
-        if not values:
-            return {'count': 0, 'min': 0, 'max': 0, 'avg': 0}
+        from stat_guard import validate_sample_size
+        validate_sample_size(values, 1, 'values')
         return {
             'count': len(values),
             'min': min(values),
@@ -136,8 +165,8 @@ class BaseApp:
         }
 
     def stats_from_numbers(self, values: List[float]) -> Dict[str, Any]:
-        if not values:
-            return {'mean': 0, 'median': 0, 'mode': None, 'stdev': 0}
+        from stat_guard import validate_sample_size, safe_stdev
+        validate_sample_size(values, 1, 'values')
         try:
             mode_value = statistics.mode(values)
         except Exception:
@@ -146,7 +175,7 @@ class BaseApp:
             'mean': round(statistics.mean(values), 4),
             'median': round(statistics.median(values), 4),
             'mode': mode_value,
-            'stdev': round(statistics.pstdev(values), 4) if len(values) > 1 else 0,
+            'stdev': round(safe_stdev(values), 4),
         }
 
     def history_tail(self, count: int = 5) -> List[str]:
@@ -157,9 +186,9 @@ class BaseApp:
             'created_at': self.state.created_at,
             'runs': self.state.runs,
             'errors': self.state.errors,
-            'records': self.state.records,
-            'flags': self.state.flags,
-            'history': self.history_tail(10),
+            'records': copy.deepcopy(self.state.records),
+            'flags': copy.deepcopy(self.state.flags),
+            'history': copy.deepcopy(self.history_tail(10)),
         }
         return self.save_json('state.json', payload)
 
@@ -190,6 +219,28 @@ class BaseApp:
             'active_items': len(active),
             'summary': self.summarize_list(values),
         }
+
+    def find_duplicates(self, items: List[Any]) -> List[Any]:
+        """Return duplicate entries in O(n) using a hash set.
+
+        Each item is converted to a hashable key (tuple for dicts,
+        ``str(item)`` for other unhashable types) for O(1) lookup.
+        """
+        seen: set[Any] = set()
+        duplicates: List[Any] = []
+        for item in items:
+            if isinstance(item, dict):
+                key = tuple(sorted(item.items()))
+            else:
+                try:
+                    key = hash(item)
+                except TypeError:
+                    key = str(item)
+            if key in seen:
+                duplicates.append(item)
+            else:
+                seen.add(key)
+        return duplicates
 
     def finalize(self) -> None:
         self.export_state()

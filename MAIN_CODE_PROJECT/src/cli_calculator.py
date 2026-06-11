@@ -14,15 +14,19 @@ class CliCalculatorApp(BaseApp):
         parts = text.split()
         if len(parts) != 3:
             raise ValueError('format: number operator number')
-        return float(parts[0]), parts[1], float(parts[2])
+        from numeric_guard import safe_float as _sf
+        return _sf(parts[0]), parts[1], _sf(parts[2])
 
     def compute(self, a: float, op: str, b: float) -> float:
+        from numeric_guard import guard_power
+        if op == '**':
+            guard_power(a, b)
         operations = {
             '+': a + b,
             '-': a - b,
             '*': a * b,
-            '/': a / b if b != 0 else math.nan,
-            '%': a % b if b != 0 else math.nan,
+            '/': a / b if b != 0 else 0.0,
+            '%': a % b if b != 0 else 0.0,
             '**': a ** b,
         }
         if op not in operations:
