@@ -10,6 +10,13 @@ import os
 import random
 import statistics
 import time
+import unicodedata
+
+from resource_guard import ResourceGuard
+
+from json_depth_guard import safe_json_loads
+
+from decimal_utils import Money, safe_decimal
 
 
 @dataclass
@@ -20,6 +27,7 @@ class BaseAppState:
     created_at: datetime = field(default_factory=datetime.utcnow)
     runs: int = 0
     errors: int = 0
+    max_history: int = 1000
 
 
 class BaseApp:
@@ -27,6 +35,7 @@ class BaseApp:
         self.state = BaseAppState()
         self.output_dir = Path('outputs')
         self.output_dir.mkdir(exist_ok=True)
+        self._guard = ResourceGuard(type(self).__name__, self.output_dir)
         self.seed = 42
         random.seed(self.seed)
 
@@ -36,6 +45,8 @@ class BaseApp:
         stamp = datetime.now().strftime('%H:%M:%S')
         entry = f'[{stamp}] {message}'
         self.state.history.append(entry)
+        if len(self.state.history) > self.state.max_history:
+            del self.state.history[:len(self.state.history) - self.state.max_history]
         print(entry)
 
     def section(self, title: str) -> None:
@@ -48,24 +59,29 @@ class BaseApp:
         return bool(str(value).strip())
 
     def safe_int(self, value: Any) -> int:
-        from numeric_guard import safe_int as _safe_int
-        return _safe_int(str(value))
+        return int(str(value).strip())
 
     def safe_float(self, value: Any) -> float:
-        from numeric_guard import safe_float as _safe_float
-        return _safe_float(str(value))
+        return float(str(value).strip())
+
+    def safe_money(self, value: str | int | float) -> Money:
+        """Convert *value* to an exact ``Money`` instance."""
+        return Money(value)
 
     def clamp(self, value: float, low: float, high: float) -> float:
         return max(low, min(high, value))
 
     def normalize_text(self, value: str) -> str:
-        return ' '.join(str(value).strip().split())
+        return ' '.join(unicodedata.normalize('NFKC', str(value)).strip().split())
 
     def normalize_key(self, value: str) -> str:
         return self.normalize_text(value).lower().replace(' ', '_')
 
     def split_words(self, value: str) -> List[str]:
-        cleaned = ''.join(ch.lower() if ch.isalnum() else ' ' for ch in value)
+        cleaned = ''.join(
+            ch.lower() if ch.isalnum() else ' '
+            for ch in unicodedata.normalize('NFKC', str(value))
+        )
         return [part for part in cleaned.split() if part]
 
     def chunk(self, items: List[Any], size: int) -> List[List[Any]]:
@@ -89,27 +105,28 @@ class BaseApp:
     # ── File I/O helpers ────────────────────────────────────────────────
 
     def save_json(self, name: str, payload: Dict[str, Any]) -> Path:
-        path = self.output_dir / name
+        path = self.output_dir / self._guard.qualify(name)
         path.write_text(json.dumps(payload, indent=2, default=str), encoding='utf-8')
         return path
 
     def load_json(self, path: Path) -> Dict[str, Any]:
+        self._guard.check_path(path)
         if not path.exists():
             return {}
         try:
-            return json.loads(path.read_text(encoding='utf-8'))
+            return FileManager.read_json(path)
         except Exception:
             return {}
 
     def save_text(self, name: str, content: str) -> Path:
-        path = self.output_dir / name
+        path = self.output_dir / self._guard.qualify(name)
         path.write_text(content, encoding='utf-8')
         return path
 
     def load_text(self, path: Path) -> str:
+        self._guard.check_path(path)
         if not path.exists():
             return ''
-        return path.read_text(encoding='utf-8')
 
     def record(self, key: str, value: Any) -> None:
         self.state.records[key] = value
