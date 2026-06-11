@@ -8,6 +8,43 @@ import json
 import time
 
 class PdfExtractorApp(BaseApp):
+    def process_dataset(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+        import re
+
+        SAFE_PATTERNS = {
+            'page_count': re.compile(r'/Page\s+(\d+)'),
+            'title': re.compile(r'Title\s*\(([^)]*)\)'),
+            'author': re.compile(r'Author\s*\(([^)]*)\)'),
+            'text_block': re.compile(r'\(([^)]{1,2000})\)'),
+            'key_value': re.compile(r'/(\w+)\s*\(([^)]*)\)'),
+        }
+
+        def guard_pathological(pattern: str, max_input: int = 100_000) -> None:
+            nested_quant = re.findall(r'\([^)]*\)[*+]', pattern)
+            if nested_quant:
+                raise ValueError(f"Potentially catastrophic pattern: {nested_quant}")
+
+        results = []
+        for item in items:
+            content = item.get('content', '')
+            if not isinstance(content, str) or len(content) > 500_000:
+                results.append({
+                    'extracted': {},
+                    'warning': 'Content too large or not a string',
+                })
+                continue
+            extracted = {}
+            for name, pattern in SAFE_PATTERNS.items():
+                matches = pattern.findall(content)
+                if matches:
+                    extracted[name] = matches[:5]
+            results.append({'extracted': extracted})
+
+        return {
+            'documents_processed': len(items),
+            'results': results,
+        }
+
     def run(self) -> None:
         self.state.runs += 1
         self.section('Processing')
