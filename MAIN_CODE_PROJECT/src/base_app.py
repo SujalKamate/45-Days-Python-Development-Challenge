@@ -53,17 +53,11 @@ class BaseApp:
     def non_empty(self, value: Any) -> bool:
         return bool(str(value).strip())
 
-    def safe_int(self, value: Any, default: int = 0) -> int:
-        try:
-            return int(str(value).strip())
-        except Exception:
-            return default
+    def safe_int(self, value: Any) -> int:
+        return int(str(value).strip())
 
-    def safe_float(self, value: Any, default: float = 0.0) -> float:
-        try:
-            return float(str(value).strip())
-        except Exception:
-            return default
+    def safe_float(self, value: Any) -> float:
+        return float(str(value).strip())
 
     def clamp(self, value: float, low: float, high: float) -> float:
         return max(low, min(high, value))
