@@ -9,9 +9,16 @@ import time
 
 class TaskManagementApp(BaseApp):
     def create_task(self, title: str, priority: int = 1) -> Dict[str, Any]:
+        if not hasattr(self, '_tasks'):
+            self._tasks = {}
+            self._next_id = 1
+        normalized_title = self.normalize_text(title)
+        for existing in self._tasks.values():
+            if existing['title'] == normalized_title and existing['priority'] == priority and not existing['done']:
+                return existing
         task_id = str(self._next_id)
         self._next_id += 1
-        task = {'id': task_id, 'title': self.normalize_text(title), 'priority': priority, 'done': False}
+        task = {'id': task_id, 'title': normalized_title, 'priority': priority, 'done': False}
         self._tasks[task_id] = task
         return task
 
