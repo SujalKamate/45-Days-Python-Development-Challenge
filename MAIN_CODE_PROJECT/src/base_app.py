@@ -11,7 +11,7 @@ import random
 import statistics
 import time
 
-from file_manager import FileManager
+from resource_guard import ResourceGuard
 
 
 @dataclass
@@ -29,6 +29,7 @@ class BaseApp:
         self.state = BaseAppState()
         self.output_dir = Path('outputs')
         self.output_dir.mkdir(exist_ok=True)
+        self._guard = ResourceGuard(type(self).__name__, self.output_dir)
         self.seed = 42
         random.seed(self.seed)
 
@@ -95,25 +96,27 @@ class BaseApp:
     # ── File I/O helpers ────────────────────────────────────────────────
 
     def save_json(self, name: str, payload: Dict[str, Any]) -> Path:
-        path = self.output_dir / name
-        FileManager.write_json(path, payload)
+        path = self.output_dir / self._guard.qualify(name)
+        path.write_text(json.dumps(payload, indent=2, default=str), encoding='utf-8')
         return path
 
     def load_json(self, path: Path) -> Dict[str, Any]:
+        self._guard.check_path(path)
+        if not path.exists():
+            return {}
         try:
             return FileManager.read_json(path)
         except Exception:
             return {}
 
     def save_text(self, name: str, content: str) -> Path:
-        path = self.output_dir / name
-        FileManager.write_text(path, content)
+        path = self.output_dir / self._guard.qualify(name)
+        path.write_text(content, encoding='utf-8')
         return path
 
     def load_text(self, path: Path) -> str:
-        try:
-            return FileManager.read_text(path)
-        except Exception:
+        self._guard.check_path(path)
+        if not path.exists():
             return ''
 
     def record(self, key: str, value: Any) -> None:
