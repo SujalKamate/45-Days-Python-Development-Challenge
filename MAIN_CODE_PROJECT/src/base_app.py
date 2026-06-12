@@ -233,6 +233,18 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.log_update('main', key, old_value, value)
             self.state.records[key] = _deepcopy(value)
 
+    def parallel_map(self, fn, items: List[Any]) -> List[Any]:
+        return self._executor.execute_batch(items, fn)
+
+    def parallel_run(self, fns: List) -> List[Any]:
+        return self._executor.run_in_parallel(fns)
+
+    def parallel_execute(self, fn) -> int:
+        return self._executor.execute(fn)
+
+    def shutdown_executor(self) -> None:
+        self._executor.shutdown()
+
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
         self.state.flags[key] = not current
