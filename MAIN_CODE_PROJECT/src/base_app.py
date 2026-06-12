@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from mutation_test import MutationTester
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._mutation_tester = MutationTester()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,20 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def mutation_test_function(self, fn: Callable[..., Any], test_fn: Callable[..., bool], max_workers: int = 4, timeout_s: float = 10.0) -> Any:
+        return self._mutation_tester.test_function(fn, test_fn, max_workers, timeout_s)
+
+    def mutation_test_source(self, source: str, test_fn: Callable[..., bool], max_workers: int = 4, timeout_s: float = 10.0) -> Any:
+        return self._mutation_tester.test_source(source, test_fn, max_workers, timeout_s)
+
+    def mutation_score(self) -> float:
+        r = self._mutation_tester.last_report
+        return r.score if r else 0.0
+
+    def mutation_summary(self) -> Dict[str, Any]:
+        r = self._mutation_tester.last_report
+        return r.summary() if r else {}
+
+    def mutation_export_artifacts(self, dir: str) -> List[str]:
+        return self._mutation_tester.export_artifacts(dir)
