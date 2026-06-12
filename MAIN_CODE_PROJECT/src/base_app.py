@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from nat_traversal import NATTraversalManager
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._nat_mgr = NATTraversalManager()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -372,6 +375,29 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.report_metrics()
 
     def finalize(self) -> None:
+        self._nat_mgr.stop_listener()
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def nat_discover_public(self) -> Optional[Tuple[str, int]]:
+        return self._nat_mgr.discover_public()
+
+    def nat_gather_candidates(self, use_stun: bool = True, use_turn: bool = False,
+                               turn_config: Optional[Dict[str, Any]] = None) -> Any:
+        return self._nat_mgr.gather(use_stun, use_turn, turn_config)
+
+    def nat_connect(self, peer_id: str, remote_candidates: List[Any], timeout: float = 5.0) -> bool:
+        return self._nat_mgr.connect_to_peer(peer_id, remote_candidates, timeout)
+
+    def nat_start_listener(self, port: int = 0) -> int:
+        return self._nat_mgr.start_listener(port)
+
+    def nat_stop_listener(self) -> None:
+        self._nat_mgr.stop_listener()
+
+    def nat_summary(self) -> Dict[str, Any]:
+        return self._nat_mgr.candidate_summary()
+
+    def nat_export_artifacts(self, dir: str) -> List[str]:
+        return self._nat_mgr.export_artifacts(dir)
