@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 import json
 import math
 import os
@@ -21,6 +21,8 @@ from json_depth_guard import safe_json_loads
 from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
+
+from pipeline_orch import PipelineOrchestrator
 
 
 @dataclass
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._pipeline = PipelineOrchestrator()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,33 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def pl_register_fn(self, name: str, fn: Callable[..., Any]) -> None:
+        self._pipeline.register_step_fn(name, fn)
+
+    def pl_unregister_fn(self, name: str) -> bool:
+        return self._pipeline.unregister_step_fn(name)
+
+    def pl_list_fns(self) -> List[str]:
+        return self._pipeline.list_step_fns()
+
+    def pl_run(self, config: Dict[str, Any], name: str = '',
+               context: Optional[Dict[str, Any]] = None) -> Any:
+        return self._pipeline.run_from_dict(config, name, context)
+
+    def pl_run_json(self, path: str, name: str = '',
+                    context: Optional[Dict[str, Any]] = None) -> Any:
+        dag = self._pipeline.from_json(path)
+        return self._pipeline.execute(dag, name, context)
+
+    def pl_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._pipeline.run_history(limit)
+
+    def pl_last_run(self) -> Optional[Dict[str, Any]]:
+        return self._pipeline.last_run()
+
+    def pl_summary(self) -> Dict[str, Any]:
+        return self._pipeline.summary()
+
+    def pl_report(self) -> str:
+        return self._pipeline.report_text()
