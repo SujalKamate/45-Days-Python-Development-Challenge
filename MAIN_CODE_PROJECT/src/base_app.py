@@ -25,8 +25,6 @@ from drift_timer import DriftCorrectedTimer, Stopwatch
 
 from file_manager import FileManager
 
-from wal_logger import WALogger
-
 
 @dataclass
 class DataPoint:
@@ -86,6 +84,8 @@ try:
 except ImportError:
     from contracts import DataProvider, DataProcessor, AppRunner  # type: ignore[import-untyped]
 
+from merkle_tree import MerkleTree, IncrementalStateReplicator
+
 
 @dataclass
 class BaseAppState:
@@ -123,12 +123,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._wal = WALogger(self.output_dir, 'BaseApp')
+        self._replicator = IncrementalStateReplicator()
         self._guard = ResourceGuard('BaseApp', self.output_dir)
-        try:
-            self.recover()
-        except Exception:
-            pass
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -291,10 +287,9 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             return f'set[{len(value)}]'
         return type(value).__name__
 
-    def recover(self) -> None:
-        self.state.records = self._wal.recover(dict(self.state.records))
-
     def export_state(self) -> Path:
+        records_snapshot = dict(self.state.records)
+        merkle_root = self._replicator.snapshot(records_snapshot)
         payload = {
             'version': 1,
             'exported_at': datetime.now(timezone.utc).isoformat(),
@@ -310,11 +305,48 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
                 'history_count': len(self.state.history),
             },
             'metadata': {
-                'records_summary': {k: self._describe_value(v) for k, v in list(self.state.records.items())[:20]},
+                'records_snapshot': records_snapshot,
                 'flags': dict(self.state.flags),
             },
+            'merkle_root': merkle_root,
         }
         return self.save_json('state.json', payload)
+
+    def verify_state(self, path: Optional[Path] = None) -> bool:
+        path = path or self.output_dir / self._guard.qualify('state.json')
+        data = self.load_json(path)
+        stored_root = data.get('merkle_root', '')
+        if not stored_root:
+            return True
+        metadata = data.get('metadata', {})
+        records_snapshot = metadata.get('records_snapshot', {})
+        return self._replicator.verify_state(records_snapshot, stored_root)
+
+    def export_delta(self, name: str = 'state_delta.json') -> Path:
+        records_export = dict(self.state.records)
+        new_root, delta = self._replicator.compute_delta(records_export)
+        if not delta:
+            return self.save_json(name, {'merkle_root': new_root, 'delta': {}})
+        payload = {
+            'merkle_root': new_root,
+            'delta': delta,
+            'exported_at': datetime.now(timezone.utc).isoformat(),
+        }
+        return self.save_json(name, payload)
+
+    def import_delta(self, path: Path) -> bool:
+        data = self.load_json(path)
+        if not data:
+            return False
+        delta = data.get('delta', {})
+        expected_root = data.get('merkle_root', '')
+        base_data = dict(self.state.records)
+        try:
+            merged = self._replicator.apply_delta(base_data, delta, expected_root)
+            self.state.records = merged
+            return True
+        except ValueError:
+            return False
 
     def _report_data(self) -> Dict[str, Any]:
         return {
