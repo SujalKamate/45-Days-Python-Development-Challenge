@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from state_journal import StateJournal
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._journal = StateJournal()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -223,6 +226,37 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def record(self, key: str, value: Any) -> None:
         self.state.records[key] = copy.deepcopy(value)
+        self._journal.append(key, value)
+
+    def state_at_time(self, timestamp: float, branch: str = 'main') -> Dict[str, Any]:
+        return self._journal.state_at(timestamp, branch)
+
+    def state_at_seq(self, seq: int, branch: str = 'main') -> Dict[str, Any]:
+        return self._journal.state_at_seq(seq, branch)
+
+    def journal_replay(self, branch: str = 'main') -> List[Dict[str, Any]]:
+        return [e.to_dict() for e in self._journal.replay(branch)]
+
+    def journal_audit(self, branch: str = 'main') -> List[Dict[str, Any]]:
+        return self._journal.audit_log(branch)
+
+    def journal_diff(self, seq_a: int, seq_b: int, branch: str = 'main') -> Dict[str, Tuple[Any, Any]]:
+        return self._journal.diff(seq_a, seq_b, branch)
+
+    def journal_create_branch(self, name: str, source: str = 'main') -> None:
+        self._journal.create_branch(name, source)
+
+    def journal_merge(self, source: str, target: str = 'main') -> int:
+        return self._journal.merge_branch(source, target)
+
+    def journal_branches(self) -> List[str]:
+        return self._journal.branch_names()
+
+    def journal_export(self) -> Dict[str, Any]:
+        return self._journal.export()
+
+    def journal_load(self, data: Dict[str, Any]) -> None:
+        self._journal.load(data)
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
