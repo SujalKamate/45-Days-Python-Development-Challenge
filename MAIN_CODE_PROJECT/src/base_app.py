@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from dist_tracing import DistributedTracer
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._tracer = DistributedTracer('BaseApp', sampling_rate=1.0)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,30 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def trace_start_span(self, name: str, kind: str = 'INTERNAL', attributes: Optional[Dict[str, Any]] = None) -> Any:
+        return self._tracer.start_span(name, kind, attributes)
+
+    def trace_end_span(self, span: Any, status: str = 'OK') -> None:
+        self._tracer.end_span(span, status)
+
+    def trace_context(self, name: str, kind: str = 'INTERNAL', attributes: Optional[Dict[str, Any]] = None) -> Any:
+        return self._tracer.trace(name, kind, attributes)
+
+    def trace_inject(self, headers: Dict[str, str], span: Optional[Any] = None) -> Dict[str, str]:
+        return self._tracer.inject(headers, span)
+
+    def trace_extract(self, headers: Dict[str, str]) -> Optional[Any]:
+        return self._tracer.extract(headers)
+
+    def trace_set_sampling(self, rate: float) -> None:
+        self._tracer.set_sampling_rate(rate)
+
+    def trace_export(self, path: str) -> None:
+        self._tracer.export(path)
+
+    def trace_summary(self) -> Dict[str, Any]:
+        return self._tracer.summary()
+
+    def trace_export_artifacts(self, dir: str) -> List[str]:
+        return self._tracer.export_artifacts(dir)
