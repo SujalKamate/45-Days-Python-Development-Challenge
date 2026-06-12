@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from state_machine_test import StateMachine, Operation, StateMachineTester
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._state_machine_tester: Optional[StateMachineTester] = None
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,37 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def sm_create_machine(self) -> StateMachine:
+        return StateMachine()
+
+    def sm_add_operation(self, machine: StateMachine, name: str, run_fn: Callable[..., Any], args_gen: Optional[Callable[[Any], tuple]] = None, precond: Optional[Callable[..., bool]] = None, postcond: Optional[Callable[..., bool]] = None) -> None:
+        machine.add_operation(Operation(name, run_fn, args_gen, precond, postcond))
+
+    def sm_add_invariant(self, machine: StateMachine, fn: Callable[..., bool]) -> None:
+        machine.add_invariant(fn)
+
+    def sm_run(self, machine: StateMachine, num_sequences: int = 50, seed: int = 0) -> Dict[str, Any]:
+        tester = StateMachineTester(machine, seed)
+        self._state_machine_tester = tester
+        tester.run_sequences(num_sequences)
+        return tester.summary()
+
+    def sm_summary(self) -> Dict[str, Any]:
+        if self._state_machine_tester is None:
+            return {}
+        return self._state_machine_tester.summary()
+
+    def sm_failure_report(self) -> Optional[Dict[str, Any]]:
+        if self._state_machine_tester is None:
+            return None
+        return self._state_machine_tester.failure_report()
+
+    def sm_export_report(self, path: str) -> None:
+        if self._state_machine_tester is not None:
+            self._state_machine_tester.export_report(path)
+
+    def sm_export_artifacts(self, dir: str) -> List[str]:
+        if self._state_machine_tester is None:
+            return []
+        return self._state_machine_tester.export_artifacts(dir)
