@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from entropy_seed import EntropyManager
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._entropy = EntropyManager()
+        self._entropy.start_monitoring()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -372,6 +376,31 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.report_metrics()
 
     def finalize(self) -> None:
+        self._entropy.stop_monitoring()
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def entropy_seed(self, nbytes: int = 32) -> bytes:
+        return self._entropy.seed(nbytes)
+
+    def entropy_seed_int(self, max_val: int = (1 << 128)) -> int:
+        return self._entropy.seed_int(max_val)
+
+    def entropy_reseed_random(self) -> None:
+        self._entropy.reseed_random()
+
+    def entropy_healthy(self) -> bool:
+        return self._entropy.healthy
+
+    def entropy_estimate(self) -> int:
+        return self._entropy.entropy_estimate
+
+    def entropy_enable_deterministic(self, seed: Optional[bytes] = None) -> None:
+        self._entropy.enable_deterministic(seed)
+
+    def entropy_disable_deterministic(self) -> None:
+        self._entropy.disable_deterministic()
+
+    def entropy_health_readings(self, n: int = 10) -> List[Dict[str, Any]]:
+        return self._entropy.health_readings(n)
