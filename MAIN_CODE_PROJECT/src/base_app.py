@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 import json
 import math
 import os
@@ -21,6 +21,8 @@ from json_depth_guard import safe_json_loads
 from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
+
+from hot_reload import HotReloadEngine
 
 
 @dataclass
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._hot_reload = HotReloadEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,41 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def hr_watch(self, module_name: str, path: str) -> None:
+        self._hot_reload.watch_module(module_name, path)
+
+    def hr_unwatch(self, module_name: str) -> None:
+        self._hot_reload.unwatch_module(module_name)
+
+    def hr_reload(self, module_name: str, migrate: bool = True) -> bool:
+        return self._hot_reload.reload_module(module_name, migrate)
+
+    def hr_rollback(self, module_name: str, version: int) -> bool:
+        return self._hot_reload.rollback_module(module_name, version)
+
+    def hr_register_migration(self, from_v: int, to_v: int,
+                              fn: Callable[[Dict[str, Any]], Dict[str, Any]],
+                              desc: str = '') -> None:
+        self._hot_reload.register_migration(from_v, to_v, fn, desc)
+
+    def hr_set_version(self, module_name: str, version: int) -> None:
+        self._hot_reload.set_current_version(module_name, version)
+
+    def hr_save_state(self, module_name: str, data: Dict[str, Any]) -> Any:
+        return self._hot_reload.save_state(module_name, data)
+
+    def hr_start_auto(self) -> None:
+        self._hot_reload.start_auto_reload()
+
+    def hr_stop_auto(self) -> None:
+        self._hot_reload.stop_auto_reload()
+
+    def hr_detect(self) -> List[str]:
+        return self._hot_reload.detect_and_reload()
+
+    def hr_summary(self) -> Dict[str, Any]:
+        return self._hot_reload.state_summary()
+
+    def hr_report(self) -> str:
+        return self._hot_reload.report_text()
