@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from barrier_sync import PhaseCoordinator, phased_execution
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._coordinator = PhaseCoordinator()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -223,6 +226,24 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def record(self, key: str, value: Any) -> None:
         self.state.records[key] = copy.deepcopy(value)
+
+    def sync_register(self, name: str) -> None:
+        self._coordinator.register(name)
+
+    def sync_unregister(self, name: str) -> None:
+        self._coordinator.unregister(name)
+
+    def sync_define_phases(self, phases: List[str]) -> None:
+        self._coordinator.define_phases(phases)
+
+    def sync_wait(self, phase: str) -> None:
+        self._coordinator.wait(phase, type(self).__name__)
+
+    def sync_set(self, key: str, value: Any) -> None:
+        self._coordinator.set_phase_data(key, value)
+
+    def sync_get(self, key: str) -> Optional[Any]:
+        return self._coordinator.get_phase_data(key)
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
