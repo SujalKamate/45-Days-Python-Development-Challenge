@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from openapi_spec import OpenAPIOrchestrator
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._openapi = OpenAPIOrchestrator('BaseApp API', '1.0.0')
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,25 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def oapi_register_endpoint(self, path: str, method: str, fn: Callable[..., Any],
+                                summary: str = '', tags: Optional[List[str]] = None) -> None:
+        self._openapi.register_endpoint(path, method, fn, summary, tags)
+
+    def oapi_register_schema(self, name: str, cls: type) -> str:
+        return self._openapi.register_schema(name, cls)
+
+    def oapi_generate(self) -> Dict[str, Any]:
+        return self._openapi.generate_spec()
+
+    def oapi_export(self, path: str, fmt: str = 'json') -> None:
+        self._openapi.export_spec(path, fmt)
+
+    def oapi_serve_docs(self, host: str = '0.0.0.0', port: int = 8080) -> Any:
+        return self._openapi.serve_docs(host, port)
+
+    def oapi_stop_server(self) -> None:
+        self._openapi.stop_server()
+
+    def oapi_export_artifacts(self, dir: str) -> List[str]:
+        return self._openapi.export_artifacts(dir)
