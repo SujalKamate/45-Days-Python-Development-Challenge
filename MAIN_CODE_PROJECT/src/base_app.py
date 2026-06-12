@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from speculative import HedgedExecutor
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._hedged = HedgedExecutor(slow_threshold=1.0, max_specs=2)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -223,6 +226,12 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def record(self, key: str, value: Any) -> None:
         self.state.records[key] = copy.deepcopy(value)
+
+    def spec_execute(self, fn) -> Any:
+        return self._hedged.execute(fn)
+
+    def spec_map(self, fns: List) -> List[Any]:
+        return self._hedged.map(fns)
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
