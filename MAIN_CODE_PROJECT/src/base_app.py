@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from hotspot import HotspotDetector, AutoRebalancer
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._hotspot = HotspotDetector()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -223,6 +226,16 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def record(self, key: str, value: Any) -> None:
         self.state.records[key] = copy.deepcopy(value)
+        self._hotspot.record(key)
+
+    def hotspot_detect(self) -> List[Tuple[str, int, float]]:
+        return self._hotspot.hotspots()
+
+    def hot_keys(self) -> List[str]:
+        return [h[0] for h in self._hotspot.hotspots()]
+
+    def is_skewed(self) -> bool:
+        return self._hotspot.is_skewed
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
