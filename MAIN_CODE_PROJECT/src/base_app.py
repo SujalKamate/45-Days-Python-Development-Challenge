@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from timing_resistant import TimingProtector, ConstantTimeResponse, TimingAudit
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._timing_protector = TimingProtector()
+        self._timing_audit = TimingAudit()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +379,27 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def timing_protect(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._timing_protector.protect(fn, *args, **kwargs)
+
+    def timing_set_delay(self, delay_ms: float) -> None:
+        self._timing_protector.set_delay(delay_ms)
+
+    def timing_get_delay(self) -> float:
+        return self._timing_protector.get_delay()
+
+    def timing_compare_and_delay(self, result: bool, delay_ms: Optional[float] = None) -> bool:
+        return self._timing_protector.compare_and_delay(result, delay_ms)
+
+    def timing_response(self, success: bool, data: Any = None, error: str = 'access denied', delay_ms: Optional[float] = None) -> Dict[str, Any]:
+        return ConstantTimeResponse.conditional(success, data, error, delay_ms or self._timing_protector.get_delay())
+
+    def timing_audit_record(self, operation: str, elapsed_ms: float, result: str) -> None:
+        self._timing_audit.record(operation, elapsed_ms, result)
+
+    def timing_audit_recent(self, n: int = 20) -> List[Dict[str, Any]]:
+        return self._timing_audit.recent(n)
+
+    def timing_audit_clear(self) -> None:
+        self._timing_audit.clear()
