@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from aead_store import AEADStore
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._aead = AEADStore()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -199,7 +202,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def save_json(self, name: str, payload: Dict[str, Any]) -> Path:
         path = self.output_dir / self._guard.qualify(name)
-        path.write_text(json.dumps(payload, indent=2, default=str), encoding='utf-8')
+        encrypted = self._aead.encrypt_state(payload)
+        path.write_bytes(encrypted)
         return path
 
     def load_json(self, path: Path) -> Dict[str, Any]:
@@ -207,9 +211,21 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         if not path.exists():
             return {}
         try:
-            return FileManager.read_json(path)
+            return self._aead.decrypt_state(path.read_bytes())
         except Exception:
             return {}
+
+    def aead_export_key(self, path: str) -> None:
+        self._aead.export_key(path)
+
+    def aead_rotate_key(self, payload_path: str, new_key_path: str) -> bytes:
+        new_key = AEADStore.load_key(new_key_path)
+        data = Path(payload_path).read_bytes()
+        return self._aead.rotate_key(data, new_key)
+
+    @staticmethod
+    def aead_load_key(path: str) -> bytes:
+        return AEADStore.load_key(path)
 
     def save_text(self, name: str, content: str) -> Path:
         path = self.output_dir / self._guard.qualify(name)
