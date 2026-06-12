@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from differential_fuzz import DifferentialFuzzRunner
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._differential_fuzz = DifferentialFuzzRunner()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,12 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def fuzz_create_campaign(self, version_a: Callable[..., Any], version_b: Callable[..., Any], name_a: str = 'old', name_b: str = 'new', name: str = 'campaign') -> Any:
+        return self._differential_fuzz.create_campaign(version_a, version_b, name_a, name_b, name)
+
+    def fuzz_run_campaign(self, input_count: int = 500, max_workers: int = 4) -> Dict[str, Any]:
+        return self._differential_fuzz.run_campaign(input_count=input_count, max_workers=max_workers)
+
+    def fuzz_export_artifacts(self, dir: str) -> List[str]:
+        return self._differential_fuzz.export_artifacts(dir)
