@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from consistent_hash_store import ConsistentHashStore
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._hash_store = ConsistentHashStore(initial_shards=4, virtual_nodes=128)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -223,6 +226,29 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def record(self, key: str, value: Any) -> None:
         self.state.records[key] = copy.deepcopy(value)
+        self._hash_store.set(key, value)
+
+    def hash_get(self, key: str) -> Optional[Any]:
+        return self._hash_store.get(key)
+
+    def hash_delete(self, key: str) -> bool:
+        self.state.records.pop(key, None)
+        return self._hash_store.delete(key)
+
+    def hash_add_shard(self, weight: int = 1) -> int:
+        return self._hash_store.add_shard(weight)
+
+    def hash_remove_shard(self) -> int:
+        return self._hash_store.remove_shard()
+
+    def hash_rebalance(self) -> int:
+        return self._hash_store.rebalance()
+
+    def hash_shard_sizes(self) -> Dict[int, int]:
+        return self._hash_store.shard_sizes()
+
+    def hash_shard_count(self) -> int:
+        return self._hash_store.shard_count
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
