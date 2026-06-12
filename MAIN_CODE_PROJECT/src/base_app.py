@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from optimistic_store import OptimisticStore
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._opt_store = OptimisticStore()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -223,6 +226,20 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def record(self, key: str, value: Any) -> None:
         self.state.records[key] = copy.deepcopy(value)
+        self._opt_store.set(key, value)
+
+    def opt_get(self, key: str) -> Optional[Any]:
+        return self._opt_store.get(key)
+
+    def opt_update(self, key: str, fn) -> bool:
+        return self._opt_store.update(key, fn)
+
+    def opt_delete(self, key: str) -> bool:
+        self.state.records.pop(key, None)
+        return self._opt_store.delete(key)
+
+    def opt_snapshot(self) -> Dict[str, Any]:
+        return self._opt_store.snapshot()
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
