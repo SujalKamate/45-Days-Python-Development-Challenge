@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 import json
 import math
 import os
@@ -21,6 +21,8 @@ from json_depth_guard import safe_json_loads
 from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
+
+from py_preprocessor import PreprocessorEngine
 
 
 @dataclass
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._preproc = PreprocessorEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,31 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def pp_parse(self, source: str) -> List[Any]:
+        return self._preproc.parse(source)
+
+    def pp_plan(self, module_name: str, source: str) -> Any:
+        return self._preproc.plan_from_source(module_name, source)
+
+    def pp_execute(self, fn: Callable[..., Any], plan: Any,
+                   *args: Any, **kwargs: Any) -> Any:
+        return self._preproc.execute(fn, plan, *args, **kwargs)
+
+    def pp_register_directive(self, name: str, handler: Callable) -> None:
+        self._preproc.register_directive(name, handler)
+
+    def pp_unregister_directive(self, name: str) -> bool:
+        return self._preproc.unregister_directive(name)
+
+    def pp_list_directives(self) -> List[str]:
+        return self._preproc.list_directives()
+
+    def pp_history(self, limit: int = 100) -> List[Dict[str, Any]]:
+        return self._preproc.history(limit)
+
+    def pp_summary(self) -> Dict[str, Any]:
+        return self._preproc.summary()
+
+    def pp_report(self) -> str:
+        return self._preproc.report_text()
