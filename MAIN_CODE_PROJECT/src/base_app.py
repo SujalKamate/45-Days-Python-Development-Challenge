@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from provenance import ProvenanceGraph
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._provenance = ProvenanceGraph()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -223,6 +226,27 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def record(self, key: str, value: Any) -> None:
         self.state.records[key] = copy.deepcopy(value)
+
+    def prov_entity(self, name: str = '', **attrs) -> str:
+        return self._provenance.entity(name=name, **attrs)
+
+    def prov_activity(self, name: str = '', **attrs) -> str:
+        return self._provenance.activity(name=name, **attrs)
+
+    def prov_agent(self, name: str = '', **attrs) -> str:
+        return self._provenance.agent(name=name, **attrs)
+
+    def prov_derivation(self, derived: str, source: str, activity: str = '') -> None:
+        self._provenance.derivation(derived, source, activity)
+
+    def prov_lineage(self, entity_id: str) -> List[Dict[str, Any]]:
+        return self._provenance.lineage(entity_id)
+
+    def prov_export(self, path: str) -> None:
+        self._provenance.export_json(path)
+
+    def prov_clear(self) -> None:
+        self._provenance.clear()
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
