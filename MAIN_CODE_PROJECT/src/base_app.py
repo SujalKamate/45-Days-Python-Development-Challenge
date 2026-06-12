@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 import json
 import math
 import os
@@ -21,6 +21,8 @@ from json_depth_guard import safe_json_loads
 from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
+
+from webhook_delivery import WebhookDeliveryEngine
 
 
 @dataclass
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._webhook = WebhookDeliveryEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,32 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def wh_register(self, url: str, secret: str = '',
+                    headers: Optional[Dict[str, str]] = None,
+                    max_retries: int = 5, timeout_s: float = 10.0,
+                    event_types: Optional[List[str]] = None,
+                    label: str = '') -> str:
+        return self._webhook.register_endpoint(url, secret, headers, max_retries, timeout_s, event_types, label)
+
+    def wh_unregister(self, endpoint_id: str) -> bool:
+        return self._webhook.unregister_endpoint(endpoint_id)
+
+    def wh_list(self) -> List[Dict[str, Any]]:
+        return self._webhook.list_endpoints()
+
+    def wh_deliver(self, event_type: str, data: Any,
+                   endpoint_id: Optional[str] = None) -> List[Any]:
+        return self._webhook.deliver(event_type, data, endpoint_id)
+
+    def wh_history(self, limit: int = 100) -> List[Dict[str, Any]]:
+        return self._webhook.delivery_history(limit)
+
+    def wh_stats(self) -> Dict[str, int]:
+        return self._webhook.delivery_stats()
+
+    def wh_summary(self) -> Dict[str, Any]:
+        return self._webhook.summary()
+
+    def wh_report(self) -> str:
+        return self._webhook.report_text()
