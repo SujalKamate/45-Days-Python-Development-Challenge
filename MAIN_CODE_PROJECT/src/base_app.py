@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from lockfree_log import LockFreeEventLog, AsyncEventBus
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._event_log = LockFreeEventLog(capacity=16384)
+        self._event_bus = AsyncEventBus(capacity=4096)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -124,9 +128,20 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         stamp = datetime.now().strftime('%H:%M:%S')
         entry = f'[{stamp}] {message}'
         self.state.history.append(entry)
-        if len(self.state.history) > self.state.max_history:
-            del self.state.history[:len(self.state.history) - self.state.max_history]
+        self._event_log.emit('info', type(self).__name__, message)
         print(entry)
+
+    def event_publish(self, event_type: str, message: str, data: Any = None) -> bool:
+        return self._event_bus.publish(event_type, type(self).__name__, message, data)
+
+    def event_subscribe(self, event_type: str, handler) -> None:
+        self._event_bus.subscribe(event_type, handler)
+
+    def event_dispatch(self) -> int:
+        return self._event_bus.dispatch()
+
+    def flush_events(self) -> None:
+        self._event_log.flush()
 
     def rotate_logs(self, keep: int = 50) -> None:
         from pathlib import Path
