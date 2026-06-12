@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from regression_select import CoverageMap, ChangeAnalyzer, RegressionTestSelectionPipeline
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._regression_pipeline = RegressionTestSelectionPipeline()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,24 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def rg_coverage_record(self, test_name: str, covered_files: Set[str]) -> None:
+        self._regression_pipeline._coverage.record(test_name, covered_files)
+
+    def rg_detect_changes(self, ref: str = 'HEAD') -> Set[str]:
+        return self._regression_pipeline.detect_changes_from_git(ref)
+
+    def rg_set_change_set(self, changed_files: Set[str]) -> None:
+        self._regression_pipeline.set_change_set(changed_files)
+
+    def rg_select_tests(self, min_score: float = 0.0) -> List[Tuple[str, float]]:
+        return self._regression_pipeline.select_tests(min_score)
+
+    def rg_run_selected(self, test_map: Dict[str, Callable[..., bool]], max_workers: int = 4) -> Dict[str, Any]:
+        return self._regression_pipeline.run_selected(test_map, max_workers)
+
+    def rg_report(self) -> Dict[str, Any]:
+        return self._regression_pipeline.report()
+
+    def rg_export_artifacts(self, dir: str) -> List[str]:
+        return self._regression_pipeline.export_artifacts(dir)
