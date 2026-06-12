@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from grpc_streaming import GRPCServer, GRPCClient, RemoteExecutor, TLSConfig
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._grpc_server: Optional[GRPCServer] = None
+        self._grpc_client: Optional[GRPCClient] = None
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +379,40 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def grpc_start_server(self, host: str = '0.0.0.0', port: int = 50051, tls_config: Optional[Any] = None) -> GRPCServer:
+        tls = tls_config or TLSConfig(insecure=True)
+        self._grpc_server = GRPCServer(host, port, tls)
+        self._grpc_server.start()
+        return self._grpc_server
+
+    def grpc_register_handler(self, server: GRPCServer, name: str, handler: Callable[..., Any]) -> None:
+        server.register_handler(name, handler)
+
+    def grpc_stop_server(self, server: GRPCServer) -> None:
+        server.stop()
+
+    def grpc_create_client(self, host: str = 'localhost', port: int = 50051, tls_config: Optional[Any] = None) -> GRPCClient:
+        tls = tls_config or TLSConfig(insecure=True)
+        self._grpc_client = GRPCClient(host, port, tls)
+        return self._grpc_client
+
+    def grpc_connect(self, client: GRPCClient) -> None:
+        client.connect()
+
+    def grpc_disconnect(self, client: GRPCClient) -> None:
+        client.disconnect()
+
+    def grpc_execute(self, client: GRPCClient, method: str, params: Optional[Dict[str, Any]] = None, timeout_s: float = 30.0) -> Dict[str, Any]:
+        exec = RemoteExecutor(client._host, client._port, client._tls)
+        exec._client = client
+        return exec.run(method, params, timeout_s)
+
+    def grpc_run_remote(self, host: str, port: int, method: str, params: Optional[Dict[str, Any]] = None, timeout_s: float = 30.0, insecure: bool = True) -> Dict[str, Any]:
+        tls = TLSConfig(insecure=insecure)
+        exec = RemoteExecutor(host, port, tls)
+        exec.connect()
+        try:
+            return exec.run(method, params, timeout_s)
+        finally:
+            exec.disconnect()
