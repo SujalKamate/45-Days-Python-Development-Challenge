@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from adaptive_batch import AdaptiveBatcher, AdaptiveBatchProcessor
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._adaptive_batcher = AdaptiveBatcher()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -223,6 +226,19 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def record(self, key: str, value: Any) -> None:
         self.state.records[key] = copy.deepcopy(value)
+
+    def batch_process(self, items: List[Any], processor_fn) -> List[Any]:
+        adapter = AdaptiveBatchProcessor(processor_fn)
+        return adapter.process(items)
+
+    def batch_current_size(self) -> int:
+        return self._adaptive_batcher.current
+
+    def batch_update(self, batch_size: int, elapsed: float) -> None:
+        self._adaptive_batcher.update(batch_size, elapsed)
+
+    def batch_resize(self, min_batch: int = 1, max_batch: int = 1024) -> None:
+        self._adaptive_batcher.resize(min_batch, max_batch)
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
