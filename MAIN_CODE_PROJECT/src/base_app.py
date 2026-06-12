@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from hw_perf_counter import HWPerfTelemetryEngine
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._hw_perf = HWPerfTelemetryEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,22 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def hw_perf_snapshot(self, module: str = 'application', metadata: Optional[Dict[str, Any]] = None) -> Any:
+        return self._hw_perf.snapshot(module, metadata)
+
+    def hw_perf_latest(self) -> Optional[Dict[str, Any]]:
+        e = self._hw_perf.latest()
+        return e.to_dict() if e else None
+
+    def hw_perf_trends(self) -> Dict[str, Any]:
+        return self._hw_perf.trends()
+
+    def hw_perf_warnings(self, threshold_pct: float = 10.0) -> List[Dict[str, Any]]:
+        return self._hw_perf.degradation_warnings(threshold_pct)
+
+    def hw_perf_report(self) -> str:
+        return self._hw_perf.report_text()
+
+    def hw_perf_export_artifacts(self, dir: str) -> List[str]:
+        return self._hw_perf.export_artifacts(dir)
