@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from content_archive import ContentArchive
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._archive = ContentArchive(self.output_dir / '.archive')
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -282,6 +285,27 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             },
         }
         return self.save_json('state.json', payload)
+
+    def archive_state(self, label: str = 'latest') -> str:
+        return self._archive.store(label, dict(self.state.records))
+
+    def restore_state(self, label: str = 'latest') -> None:
+        data = self._archive.load(label)
+        if data:
+            self.state.records.clear()
+            self.state.records.update(data)
+
+    def archive_delta(self, label: str, base_label: str = 'latest') -> str:
+        return self._archive.store_delta(label, base_label, dict(self.state.records))
+
+    def restore_delta(self, label: str, base_label: str = 'latest') -> None:
+        data = self._archive.load_delta(label, base_label)
+        if data:
+            self.state.records.clear()
+            self.state.records.update(data)
+
+    def gc_archive(self) -> int:
+        return self._archive.gc()
 
     def _report_data(self) -> Dict[str, Any]:
         return {
