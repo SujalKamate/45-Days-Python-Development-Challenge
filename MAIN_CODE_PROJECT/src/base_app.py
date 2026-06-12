@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from stat_profiler import StatisticalProfiler, ProfilingOrchestrator
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._profiler_orch = ProfilingOrchestrator()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,33 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def prof_create_run(self, name: str, interval_s: float = 0.001) -> StatisticalProfiler:
+        return self._profiler_orch.create_run(name, interval_s)
+
+    def prof_start(self, profiler: StatisticalProfiler) -> None:
+        profiler.start()
+
+    def prof_stop(self, profiler: StatisticalProfiler) -> None:
+        profiler.stop()
+
+    def prof_profile(self, profiler: StatisticalProfiler, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return profiler.profile(fn, *args, **kwargs)
+
+    def prof_flame_graph(self, profiler: StatisticalProfiler, title: str = 'Flame Graph') -> str:
+        return profiler.generate_flame_graph(title)
+
+    def prof_save_flame_graph(self, profiler: StatisticalProfiler, path: str, title: str = 'Flame Graph') -> None:
+        profiler.save_flame_graph(path, title)
+
+    def prof_report(self, profiler: StatisticalProfiler) -> Any:
+        return profiler.report()
+
+    def prof_compare(self, name_a: str, name_b: str) -> Dict[str, Any]:
+        return self._profiler_orch.compare_runs(name_a, name_b)
+
+    def prof_run_names(self) -> List[str]:
+        return self._profiler_orch.run_names()
+
+    def prof_export_artifacts(self, dir: str) -> List[str]:
+        return self._profiler_orch.export_artifacts(dir)
