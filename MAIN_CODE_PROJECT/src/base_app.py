@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from env_config import EnvConfigEngine
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._env_config = EnvConfigEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,49 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def ec_set_config(self, config: Dict[str, Any]) -> None:
+        self._env_config.set_config(config)
+
+    def ec_update(self, key: str, value: Any) -> None:
+        self._env_config.update_config(key, value)
+
+    def ec_get(self, key: str, default: Any = None) -> Any:
+        return self._env_config.get_config(key, default)
+
+    def ec_load_env(self, prefix: str = 'APP_') -> None:
+        self._env_config.load_from_env(prefix)
+
+    def ec_validate(self, profile: str = '') -> Any:
+        return self._env_config.validate(profile)
+
+    def ec_validate_all(self) -> Dict[str, Any]:
+        return self._env_config.validate_all_profiles()
+
+    def ec_create_profile(self, name: str, desc: str = '', base: str = '') -> Any:
+        return self._env_config.create_profile(name, desc, base)
+
+    def ec_add_rule(self, profile: str, key: str, rule_type: str = 'required',
+                    expected_type: Optional[str] = None,
+                    min_value: Optional[float] = None,
+                    max_value: Optional[float] = None,
+                    allowed: Optional[List[Any]] = None,
+                    pattern: Optional[str] = None,
+                    severity: str = 'error') -> None:
+        from env_config import ConfigRule
+        self._env_config.add_rule(profile, ConfigRule(
+            key, rule_type, expected_type, min_value, max_value,
+            pattern=pattern, allowed_values=allowed, severity=severity,
+        ))
+
+    def ec_readiness(self) -> Dict[str, Any]:
+        return self._env_config.run_readiness()
+
+    def ec_history(self, limit: int = 100) -> List[Dict[str, Any]]:
+        return self._env_config.history(limit)
+
+    def ec_summary(self) -> Dict[str, Any]:
+        return self._env_config.summary()
+
+    def ec_report(self) -> str:
+        return self._env_config.report_text()
