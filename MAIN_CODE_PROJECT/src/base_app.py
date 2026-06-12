@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from wasm_runtime import PluginRegistry, WASIEndpoint
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._wasm_registry = PluginRegistry()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,24 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def wasm_register_plugin(self, plugin_id: str, source: str, endpoints: Optional[List[WASIEndpoint]] = None) -> Any:
+        return self._wasm_registry.register_plugin(plugin_id, source, endpoints)
+
+    def wasm_register_from_file(self, file_path: str) -> Any:
+        return self._wasm_registry.register_plugin_from_path(file_path)
+
+    def wasm_run(self, plugin_id: str, export: str = '_start', *args: Any) -> Any:
+        return self._wasm_registry.run_plugin(plugin_id, export, *args)
+
+    def wasm_discover(self) -> List[str]:
+        return self._wasm_registry.discover_plugins()
+
+    def wasm_list(self) -> List[Dict[str, Any]]:
+        return self._wasm_registry.list_plugins()
+
+    def wasm_unload(self, plugin_id: str) -> bool:
+        return self._wasm_registry.unload_plugin(plugin_id)
+
+    def wasm_export_artifacts(self, dir: str) -> List[str]:
+        return self._wasm_registry.export_artifacts(dir)
