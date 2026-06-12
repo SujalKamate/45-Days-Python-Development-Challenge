@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from mvcc_store import MVCCStore
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._mvcc = MVCCStore()
+        self._current_txn: int = 0
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -222,7 +226,21 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             return ''
 
     def record(self, key: str, value: Any) -> None:
-        self.state.records[key] = copy.deepcopy(value)
+        self.state.records[key] = value
+        if not self._current_txn:
+            self._current_txn = self._mvcc.begin_txn()
+        self._mvcc.set(key, value, self._current_txn)
+
+    def read_record(self, key: str) -> Any:
+        txn = self._current_txn or self._mvcc.begin_txn()
+        return self._mvcc.get(key, txn)
+
+    def snapshot_view(self) -> Dict[str, Any]:
+        txn = self._current_txn or self._mvcc.begin_txn()
+        return self._mvcc.snapshot(txn)
+
+    def gc_versions(self, max_versions: int = 5) -> None:
+        self._mvcc.gc(max_versions)
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
