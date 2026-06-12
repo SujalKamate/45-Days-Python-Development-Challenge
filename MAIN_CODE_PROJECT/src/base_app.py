@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from sec_compare import SecureCompare
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._sec_cmp = SecureCompare()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,27 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def sec_bytes_eq(self, a: bytes, b: bytes) -> bool:
+        return self._sec_cmp.bytes_eq(a, b)
+
+    def sec_str_eq(self, a: str, b: str) -> bool:
+        return self._sec_cmp.str_eq(a, b)
+
+    def sec_int_eq(self, a: int, b: int) -> bool:
+        return self._sec_cmp.int_eq(a, b)
+
+    def sec_dict_eq(self, a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+        return self._sec_cmp.dict_eq(a, b)
+
+    def sec_checksum(self, data: bytes) -> bytes:
+        return self._sec_cmp.checksum(data)
+
+    def sec_verify_checksum(self, data: bytes, expected: bytes) -> bool:
+        return self._sec_cmp.verify_checksum(data, expected)
+
+    def sec_hmac_sign(self, key: bytes, message: bytes) -> bytes:
+        return self._sec_cmp.hmac_sign(key, message)
+
+    def sec_verify_hmac(self, key: bytes, message: bytes, expected_mac: bytes) -> bool:
+        return self._sec_cmp.verify_hmac(key, message, expected_mac)
