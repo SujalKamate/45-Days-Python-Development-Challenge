@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from cpu_affinity import AffinityOrchestrator
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._affinity_orch = AffinityOrchestrator()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,21 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def aff_topology(self) -> Dict[str, Any]:
+        return self._affinity_orch.topology_summary()
+
+    def aff_pin_current(self, core: int) -> bool:
+        return self._affinity_orch.pin_current(core)
+
+    def aff_create_pool(self, max_workers: int = 0, numa_aware: bool = True) -> Any:
+        return self._affinity_orch.create_pool(max_workers, numa_aware)
+
+    def aff_suggest_node(self, data_hint: Optional[int] = None) -> int:
+        return self._affinity_orch.suggest_node(data_hint)
+
+    def aff_suggest_cores(self, count: int, preferred_node: Optional[int] = None) -> List[int]:
+        return self._affinity_orch.suggest_cores(count, preferred_node)
+
+    def aff_export_artifacts(self, dir: str) -> List[str]:
+        return self._affinity_orch.export_artifacts(dir)
