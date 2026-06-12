@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from sharded_store import ShardedStore
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._shards = ShardedStore(initial_shards=4)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -223,6 +226,26 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def record(self, key: str, value: Any) -> None:
         self.state.records[key] = copy.deepcopy(value)
+        self._shards.set(key, value)
+
+    def shard_get(self, key: str) -> Optional[Any]:
+        return self._shards.get(key)
+
+    def shard_delete(self, key: str) -> bool:
+        self.state.records.pop(key, None)
+        return self._shards.delete(key)
+
+    def shard_add_node(self) -> int:
+        return self._shards.add_shard()
+
+    def shard_remove_node(self) -> int:
+        return self._shards.remove_shard()
+
+    def shard_sizes(self) -> Dict[int, int]:
+        return self._shards.shard_sizes()
+
+    def shard_count(self) -> int:
+        return self._shards.shard_count
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
