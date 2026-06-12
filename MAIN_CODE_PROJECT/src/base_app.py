@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from cache_optimizer import CacheOptimizationAdvisor, CacheOptimizationOrchestrator, StructOfArrays, ArrayOfStructures, LayoutConverter
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._cache_orch = CacheOptimizationOrchestrator()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,26 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def cache_register(self, name: str) -> CacheOptimizationAdvisor:
+        return self._cache_orch.register(name)
+
+    def cache_record_access(self, advisor: CacheOptimizationAdvisor, fields: List[str]) -> None:
+        advisor.record(fields)
+
+    def cache_analyze(self, advisor: CacheOptimizationAdvisor, all_fields: List[str], field_sizes: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
+        return advisor.analyze(all_fields, field_sizes)
+
+    def cache_report(self, advisor: CacheOptimizationAdvisor, all_fields: List[str], field_sizes: Optional[Dict[str, int]] = None) -> str:
+        return advisor.report_text(all_fields, field_sizes)
+
+    def cache_aos_to_soa(self, data: List[Dict[str, Any]]) -> Any:
+        aos = ArrayOfStructures.from_list(data)
+        return LayoutConverter.aos_to_soa(aos)
+
+    def cache_soa_to_aos(self, soa: Any) -> List[Dict[str, Any]]:
+        aos = LayoutConverter.soa_to_aos(soa)
+        return aos.to_list()
+
+    def cache_export_artifacts(self, dir: str) -> List[str]:
+        return self._cache_orch.export_artifacts(dir)
