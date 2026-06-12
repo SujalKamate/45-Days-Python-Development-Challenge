@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from dedup import DedupTracker, ContentAddressedStore
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._dedup = DedupTracker()
+        self._ca_store = ContentAddressedStore()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -223,6 +227,29 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def record(self, key: str, value: Any) -> None:
         self.state.records[key] = copy.deepcopy(value)
+        self._ca_store.put(key, value)
+
+    def dedup_filter(self, records: List[Any]) -> List[Any]:
+        new_records, _ = self._dedup.filter(records)
+        return new_records
+
+    def dedup_is_new(self, record: Any) -> bool:
+        return not self._dedup.is_duplicate(record)
+
+    def dedup_mark(self, record: Any) -> None:
+        self._dedup.mark_processed(record)
+
+    def dedup_export(self) -> Dict[str, Any]:
+        return self._dedup.export()
+
+    def dedup_load(self, data: Dict[str, Any]) -> None:
+        self._dedup.load(data)
+
+    def dedup_stats(self) -> Dict[str, int]:
+        return self._dedup.stats
+
+    def dedup_reset(self) -> None:
+        self._dedup.reset()
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
