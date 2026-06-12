@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from lua_sandbox import ScriptStore
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._lua_store = ScriptStore()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,24 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def lua_save_script(self, name: str, script: str) -> str:
+        return self._lua_store.save_script(name, script)
+
+    def lua_load_script(self, name: str) -> Optional[str]:
+        return self._lua_store.load_script(name)
+
+    def lua_run_script(self, name: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        return self._lua_store.run_script(name, input_data)
+
+    def lua_run_inline(self, script: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        return self._lua_store.run_inline(script, input_data)
+
+    def lua_list_scripts(self) -> List[str]:
+        return self._lua_store.list_scripts()
+
+    def lua_delete_script(self, name: str) -> bool:
+        return self._lua_store.delete_script(name)
+
+    def lua_export_artifacts(self, dir: str) -> List[str]:
+        return self._lua_store.export_artifacts(dir)
