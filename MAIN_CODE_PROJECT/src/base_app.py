@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from rate_limiter import RateLimiter, ThrottledExecutor
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._rate_limiter = RateLimiter(default_rate=10.0, default_capacity=20)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -223,6 +226,18 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def record(self, key: str, value: Any) -> None:
         self.state.records[key] = copy.deepcopy(value)
+
+    def rate_acquire(self, key: str = 'default') -> None:
+        self._rate_limiter.acquire(key)
+
+    def rate_try_acquire(self, key: str = 'default') -> bool:
+        return self._rate_limiter.try_acquire(key)
+
+    def rate_configure(self, key: str, rate: float, capacity: int) -> None:
+        self._rate_limiter.configure(key, rate, capacity)
+
+    def rate_reset(self) -> None:
+        self._rate_limiter.reset()
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
