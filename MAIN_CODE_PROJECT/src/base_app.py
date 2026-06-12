@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from work_stealer import WorkStealingExecutor
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._executor = WorkStealingExecutor(max_workers=4)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -223,6 +226,18 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def record(self, key: str, value: Any) -> None:
         self.state.records[key] = copy.deepcopy(value)
+
+    def parallel_map(self, fn, items: List[Any]) -> List[Any]:
+        return self._executor.execute_batch(items, fn)
+
+    def parallel_run(self, fns: List) -> List[Any]:
+        return self._executor.run_in_parallel(fns)
+
+    def parallel_execute(self, fn) -> int:
+        return self._executor.execute(fn)
+
+    def shutdown_executor(self) -> None:
+        self._executor.shutdown()
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
