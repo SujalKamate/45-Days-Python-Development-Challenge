@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from crdt_sync import CRDTClusterSync, LWWMap, PNCounter, TwoPhaseSet
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._crdt = CRDTClusterSync('baseapp')
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -372,6 +375,46 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.report_metrics()
 
     def finalize(self) -> None:
+        self._crdt.stop_periodic_sync()
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def crdt_create_lww_map(self, key: str = 'state') -> LWWMap:
+        return self._crdt.create_lww_map(key)
+
+    def crdt_create_pn_counter(self, key: str = 'counter') -> PNCounter:
+        return self._crdt.create_pn_counter(key)
+
+    def crdt_create_set(self, key: str = 'set') -> TwoPhaseSet:
+        return self._crdt.create_two_phase_set(key)
+
+    def crdt_set_value(self, crdt: Any, key: str, value: Any) -> None:
+        if isinstance(crdt, LWWMap):
+            crdt.set(key, value)
+        elif isinstance(crdt, PNCounter):
+            if value >= 0:
+                crdt.increment(amount=value)
+            else:
+                crdt.decrement(amount=-value)
+        elif isinstance(crdt, TwoPhaseSet):
+            crdt.add(value)
+
+    def crdt_get_value(self, crdt: Any, key: Optional[str] = None) -> Any:
+        if isinstance(crdt, LWWMap):
+            return crdt.get(key) if key else crdt.all_data
+        if isinstance(crdt, (PNCounter, TwoPhaseSet)):
+            return crdt.value if hasattr(crdt, 'value') else crdt.elements
+        return None
+
+    def crdt_merge_all(self) -> Dict[str, List[str]]:
+        return self._crdt.merge_all()
+
+    def crdt_start_sync(self, interval_s: float = 5.0) -> None:
+        self._crdt.start_periodic_sync(interval_s)
+
+    def crdt_stop_sync(self) -> None:
+        self._crdt.stop_periodic_sync()
+
+    def crdt_export_artifacts(self, dir: str) -> List[str]:
+        return self._crdt.export_artifacts(dir)
