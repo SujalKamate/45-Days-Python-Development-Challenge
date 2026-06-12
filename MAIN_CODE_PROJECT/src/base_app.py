@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from secret_sharer import SecretSharer, RotatingKeyManager
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._key_manager = RotatingKeyManager(threshold=3, total_shares=5)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -223,6 +226,15 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def record(self, key: str, value: Any) -> None:
         self.state.records[key] = copy.deepcopy(value)
+
+    def secret_split(self, label: str, secret: bytes) -> List[str]:
+        return self._key_manager.create(label, secret)
+
+    def secret_recover(self, label: str, share_indices: List[int]) -> bytes:
+        return self._key_manager.recover(label, share_indices)
+
+    def secret_rotate(self, label: str, share_indices: List[int]) -> List[str]:
+        return self._key_manager.rotate(label, share_indices)
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
