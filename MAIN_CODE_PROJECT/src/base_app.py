@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from checkpoint_pipeline import CheckpointedPipeline, CheckpointStore
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._ckpt_store = CheckpointStore(self.output_dir / '.checkpoints')
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -223,6 +226,26 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def record(self, key: str, value: Any) -> None:
         self.state.records[key] = copy.deepcopy(value)
+
+    def ckpt_pipeline(self, run_id: str = 'default') -> CheckpointedPipeline:
+        pipeline = CheckpointedPipeline(self.output_dir / '.checkpoints', run_id)
+        return pipeline
+
+    def ckpt_run(self, stages: List[Tuple[str, Callable]], initial: Any = None,
+                 run_id: str = 'default') -> Any:
+        pipeline = self.ckpt_pipeline(run_id)
+        for name, fn in stages:
+            pipeline.add_stage(name, fn)
+        return pipeline.run(initial)
+
+    def ckpt_resume(self, run_id: str = 'default') -> Optional[str]:
+        store = CheckpointStore(self.output_dir / '.checkpoints')
+        ckpt = store.last_checkpoint(run_id)
+        return ckpt.stage_name if ckpt else None
+
+    def ckpt_clear(self, run_id: str = 'default') -> None:
+        store = CheckpointStore(self.output_dir / '.checkpoints')
+        store.clear_run(run_id)
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
