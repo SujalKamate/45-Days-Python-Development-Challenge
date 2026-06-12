@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from copy import deepcopy as _deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,6 +22,10 @@ from json_depth_guard import safe_json_loads
 from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
+
+from file_manager import FileManager
+
+from wal_logger import WALogger
 
 
 @dataclass
@@ -90,6 +95,7 @@ class BaseAppState:
     created_at: datetime = field(default_factory=datetime.utcnow)
     runs: int = 0
     errors: int = 0
+    max_history: int = 1000
     perf_metrics: Dict[str, List[float]] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _next_id: int = 0
@@ -117,6 +123,12 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._wal = WALogger(self.output_dir, 'BaseApp')
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
+        try:
+            self.recover()
+        except Exception:
+            pass
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -222,7 +234,10 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             return ''
 
     def record(self, key: str, value: Any) -> None:
-        self.state.records[key] = copy.deepcopy(value)
+        old_value = self.state.records.get(key)
+        with self.state._lock:
+            self._wal.log_update('main', key, old_value, value)
+            self.state.records[key] = _deepcopy(value)
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
@@ -261,6 +276,24 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         canonical = json.dumps(data, sort_keys=True, default=str)
         return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
 
+    @staticmethod
+    def _describe_value(value: Any) -> str:
+        if isinstance(value, (str, bytes)):
+            v = str(value)
+            return repr(v[:50]) + ('...' if len(v) > 50 else '')
+        if isinstance(value, (int, float, bool)):
+            return str(value)
+        if isinstance(value, (list, tuple)):
+            return f'{type(value).__name__}[{len(value)}]'
+        if isinstance(value, dict):
+            return f'dict[{len(value)}]'
+        if isinstance(value, set):
+            return f'set[{len(value)}]'
+        return type(value).__name__
+
+    def recover(self) -> None:
+        self.state.records = self._wal.recover(dict(self.state.records))
+
     def export_state(self) -> Path:
         payload = {
             'version': 1,
@@ -291,8 +324,6 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             'flags': len(self.state.flags),
             'history_entries': len(self.state.history),
         }
-        payload['_checksum'] = self._compute_checksum(payload)
-        return self.save_json('state.json', payload)
 
     @contextmanager
     def _time_it(self, label: str) -> Generator[None, None, None]:
@@ -311,6 +342,13 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             avg = sum(timings) / len(timings)
             total = sum(timings)
             print(self.format_kv(label, f'{avg*1000:.1f}ms avg ({total*1000:.1f}ms total, {len(timings)} call(s))'))
+
+    def format_report(self) -> str:
+        data = self._report_data()
+        lines = [f'Runs: {data["runs"]}', f'Errors: {data["errors"]}',
+                 f'Records: {data["records"]}', f'Flags: {data["flags"]}',
+                 f'History entries: {data["history_entries"]}']
+        return '\n'.join(lines)
 
     def display_report(self) -> None:
         print(self.format_report())
@@ -361,6 +399,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def run(self) -> None:
         self.state.runs += 1
+        self._wal.begin_txn('main')
         self.section('Processing')
         with self._time_it('dataset'):
             items = self.dataset()
@@ -374,4 +413,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
     def finalize(self) -> None:
         with self._time_it('export_state'):
             self.export_state()
+        with self.state._lock:
+            self._wal.write_checkpoint(dict(self.state.records))
+        self._wal.commit_txn('main')
         self.log('Finalized successfully')
