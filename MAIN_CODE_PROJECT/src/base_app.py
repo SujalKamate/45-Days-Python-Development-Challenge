@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from adaptive_profiler import AdaptiveProfiler, AdaptiveProfilingOrchestrator
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._adaptive_prof_orch = AdaptiveProfilingOrchestrator()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,27 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def adapt_prof_create_run(self, name: str) -> AdaptiveProfiler:
+        return self._adaptive_prof_orch.create_run(name)
+
+    def adapt_prof_start(self, profiler: AdaptiveProfiler) -> None:
+        profiler.start()
+
+    def adapt_prof_stop(self, profiler: AdaptiveProfiler) -> None:
+        profiler.stop()
+
+    def adapt_prof_profile(self, profiler: AdaptiveProfiler, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return profiler.profile(fn, *args, **kwargs)
+
+    def adapt_prof_phase_summary(self, profiler: AdaptiveProfiler) -> Dict[str, Any]:
+        return profiler.phase_summary()
+
+    def adapt_prof_adaptive_summary(self, profiler: AdaptiveProfiler) -> Dict[str, Any]:
+        return profiler.adaptive_summary()
+
+    def adapt_prof_report(self, profiler: AdaptiveProfiler) -> str:
+        return profiler.report_text()
+
+    def adapt_prof_export_artifacts(self, dir: str) -> List[str]:
+        return self._adaptive_prof_orch.export_artifacts(dir)
