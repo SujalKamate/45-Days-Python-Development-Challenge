@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from metamorphic_test import MetamorphicTestRunner, MetamorphicTestSuite, IdentityRelation, PermutationRelation, AddRemoveRelation, MonotonicityRelation
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._metamorphic = MetamorphicTestRunner()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,21 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def meta_create_suite(self, target: Callable[..., Any], name: str = '') -> MetamorphicTestSuite:
+        return self._metamorphic.create_suite(target, name)
+
+    def meta_run_all(self) -> Dict[str, List[Any]]:
+        return self._metamorphic.run_all()
+
+    def meta_summary(self) -> List[Dict[str, Any]]:
+        return self._metamorphic.summary()
+
+    def meta_total_summary(self) -> Dict[str, Any]:
+        return self._metamorphic.total_summary()
+
+    def meta_export_report(self, path: str, format: str = 'json') -> None:
+        self._metamorphic.export_report(path, format)
+
+    def meta_export_artifacts(self, dir: str) -> List[str]:
+        return self._metamorphic.export_artifacts(dir)
