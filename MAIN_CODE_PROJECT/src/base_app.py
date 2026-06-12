@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from copy import deepcopy as _deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -94,6 +95,7 @@ class BaseAppState:
     created_at: datetime = field(default_factory=datetime.utcnow)
     runs: int = 0
     errors: int = 0
+    max_history: int = 1000
     perf_metrics: Dict[str, List[float]] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _next_id: int = 0
@@ -228,7 +230,10 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             return ''
 
     def record(self, key: str, value: Any) -> None:
-        self.state.records[key] = copy.deepcopy(value)
+        old_value = self.state.records.get(key)
+        with self.state._lock:
+            self._wal.log_update('main', key, old_value, value)
+            self.state.records[key] = _deepcopy(value)
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
@@ -351,8 +356,6 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             'flags': len(self.state.flags),
             'history_entries': len(self.state.history),
         }
-        payload['_checksum'] = self._compute_checksum(payload)
-        return self.save_json('state.json', payload)
 
     @contextmanager
     def _time_it(self, label: str) -> Generator[None, None, None]:
@@ -371,6 +374,13 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             avg = sum(timings) / len(timings)
             total = sum(timings)
             print(self.format_kv(label, f'{avg*1000:.1f}ms avg ({total*1000:.1f}ms total, {len(timings)} call(s))'))
+
+    def format_report(self) -> str:
+        data = self._report_data()
+        lines = [f'Runs: {data["runs"]}', f'Errors: {data["errors"]}',
+                 f'Records: {data["records"]}', f'Flags: {data["flags"]}',
+                 f'History entries: {data["history_entries"]}']
+        return '\n'.join(lines)
 
     def display_report(self) -> None:
         print(self.format_report())
@@ -421,6 +431,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def run(self) -> None:
         self.state.runs += 1
+        self._wal.begin_txn('main')
         self.section('Processing')
         with self._time_it('dataset'):
             items = self.dataset()
@@ -434,4 +445,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
     def finalize(self) -> None:
         with self._time_it('export_state'):
             self.export_state()
+        with self.state._lock:
+            self._wal.write_checkpoint(dict(self.state.records))
+        self._wal.commit_txn('main')
         self.log('Finalized successfully')
