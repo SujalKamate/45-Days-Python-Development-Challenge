@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from concolic_test import ConcolicTestRunner
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._concolic = ConcolicTestRunner()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,15 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def concolic_generate_inputs(self, fn: Callable[..., Any], initial_inputs: Dict[str, Any], max_paths: int = 20) -> List[Dict[str, Any]]:
+        return self._concolic.generate_inputs(fn, initial_inputs, max_paths)
+
+    def concolic_trace(self, fn: Callable[..., Any], **inputs: Any) -> Any:
+        return self._concolic.trace(fn, **inputs)
+
+    def concolic_coverage_report(self) -> Dict[str, Any]:
+        return self._concolic.coverage_report()
+
+    def concolic_export_artifacts(self, dir: str) -> List[str]:
+        return self._concolic.export_artifacts(dir)
