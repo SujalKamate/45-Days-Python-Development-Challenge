@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from async_state_store import AsyncStorageEngine
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._async_storage = AsyncStorageEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,33 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def async_store(self, name: str, data: Dict[str, Any]) -> Any:
+        return self._async_storage.run(self._async_storage.store(name, data))
+
+    def async_load(self, name: str) -> Dict[str, Any]:
+        return self._async_storage.run(self._async_storage.load(name))
+
+    def async_store_batch(self, items: Dict[str, Dict[str, Any]]) -> int:
+        return self._async_storage.run(self._async_storage.store_batch(items))
+
+    def async_submit(self, name: str, data: Dict[str, Any]) -> None:
+        self._async_storage.submit(name, data)
+
+    def async_flush(self) -> int:
+        return self._async_storage.run(self._async_storage.flush())
+
+    def async_completions(self) -> List[Any]:
+        return self._async_storage.completion_queue()
+
+    def async_pending(self) -> int:
+        return self._async_storage.pending
+
+    def async_metrics(self) -> Dict[str, Any]:
+        return self._async_storage.metrics()
+
+    def async_list(self) -> List[str]:
+        return self._async_storage.list_states()
+
+    def async_delete(self, name: str) -> bool:
+        return self._async_storage.delete(name)
