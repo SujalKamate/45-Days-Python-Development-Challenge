@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from capability_auth import CapabilityManager
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._cap_manager = CapabilityManager()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,28 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def cap_issue(self, object_id: str, actions: Set[str], issuer: str, expiry: Any = None, caveats: Optional[List[Dict[str, Any]]] = None) -> Any:
+        from capability_auth import CapabilityToken
+        return self._cap_manager.issue(object_id, actions, issuer, expiry, caveats)
+
+    def cap_delegate(self, token: Any, issuer: str, restricted_actions: Optional[Set[str]] = None, additional_caveats: Optional[List[Dict[str, Any]]] = None, expiry: Any = None) -> Any:
+        return self._cap_manager.delegate(token, issuer, restricted_actions, additional_caveats, expiry)
+
+    def cap_attenuate(self, token: Any, issuer: str, remove_actions: Optional[Set[str]] = None, add_caveats: Optional[List[Dict[str, Any]]] = None) -> Any:
+        return self._cap_manager.attenuate(token, issuer, remove_actions, add_caveats)
+
+    def cap_check(self, token: Any, object_id: str, action: str) -> bool:
+        return self._cap_manager.check(token, object_id, action)
+
+    def cap_validate(self, token: Any) -> bool:
+        return self._cap_manager.validate(token)
+
+    def cap_revoke(self, token: Any) -> None:
+        self._cap_manager.revoke(token)
+
+    def cap_audit_log(self, n: int = 50) -> List[Dict[str, Any]]:
+        return self._cap_manager.audit_log(n)
+
+    def cap_audit_clear(self) -> None:
+        self._cap_manager.audit_clear()
