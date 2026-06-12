@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from history_store import HistoryStore
+
 
 @dataclass
 class DataPoint:
@@ -84,7 +86,7 @@ except ImportError:
 
 @dataclass
 class BaseAppState:
-    history: List[str] = field(default_factory=list)
+    history: HistoryStore = field(default_factory=lambda: HistoryStore(1000))
     records: Dict[str, Any] = field(default_factory=dict)
     flags: Dict[str, bool] = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.utcnow)
@@ -124,8 +126,6 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         stamp = datetime.now().strftime('%H:%M:%S')
         entry = f'[{stamp}] {message}'
         self.state.history.append(entry)
-        if len(self.state.history) > self.state.max_history:
-            del self.state.history[:len(self.state.history) - self.state.max_history]
         print(entry)
 
     def rotate_logs(self, keep: int = 50) -> None:
@@ -254,7 +254,13 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         }
 
     def history_tail(self, count: int = 5) -> List[str]:
-        return self.state.history[-count:]
+        return self.state.history.tail(count)
+
+    def history_frequencies(self) -> Dict[str, int]:
+        return self.state.history._cache.frequencies()
+
+    def history_resize(self, new_max: int) -> int:
+        return self.state.history._cache.resize(new_max)
 
     @staticmethod
     def _compute_checksum(data: Dict[str, Any]) -> str:
