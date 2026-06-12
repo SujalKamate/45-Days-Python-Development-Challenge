@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from state_diff import StateDiffEngine
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._state_diff = StateDiffEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,37 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def sd_snapshot(self, key: str) -> None:
+        self._state_diff.save_snapshot(key, self.state.to_dict() if hasattr(self.state, 'to_dict') else self.state.__dict__)
+
+    def sd_compare(self, before_key: str, after_key: str) -> Any:
+        return self._state_diff.diff_snapshots(before_key, after_key)
+
+    def sd_diff(self, before: Dict[str, Any], after: Dict[str, Any],
+                before_label: str = 'before', after_label: str = 'after') -> Any:
+        return self._state_diff.diff_states(before, after, before_label, after_label)
+
+    def sd_record(self, version: str, before: Dict[str, Any], after: Dict[str, Any]) -> Any:
+        return self._state_diff.record_change(version, before, after)
+
+    def sd_ignore_path(self, path: str) -> None:
+        self._state_diff.ignore_path(path)
+
+    def sd_ignore_type(self, type_name: str) -> None:
+        self._state_diff.ignore_type(type_name)
+
+    def sd_changelog(self) -> str:
+        return self._state_diff.text_changelog()
+
+    def sd_changelog_html(self) -> str:
+        return self._state_diff.html_changelog()
+
+    def sd_changelog_md(self) -> str:
+        return self._state_diff.markdown_changelog()
+
+    def sd_summary(self) -> Dict[str, Any]:
+        return self._state_diff.summary()
+
+    def sd_report(self) -> str:
+        return self._state_diff.report_text()
