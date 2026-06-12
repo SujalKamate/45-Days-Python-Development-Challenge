@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 import json
 import math
 import os
@@ -21,6 +21,8 @@ from json_depth_guard import safe_json_loads
 from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
+
+from import_validator import ImportValidationEngine
 
 
 @dataclass
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._import_val = ImportValidationEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,33 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def iv_validate_source(self, source: str, filename: str = '') -> Any:
+        return self._import_val.validate_source(source, filename)
+
+    def iv_validate_file(self, path: str) -> Any:
+        return self._import_val.validate_file(path)
+
+    def iv_validate_module(self, module_name: str) -> Any:
+        return self._import_val.validate_module(module_name)
+
+    def iv_add_rule(self, rule: Any) -> None:
+        self._import_val.add_rule(rule)
+
+    def iv_remove_rule(self, name: str) -> bool:
+        return self._import_val.remove_rule(name)
+
+    def iv_list_rules(self) -> List[str]:
+        return self._import_val.list_rules()
+
+    def iv_set_strict(self, enabled: bool) -> None:
+        self._import_val.set_strict_mode(enabled)
+
+    def iv_history(self, limit: int = 100) -> List[Dict[str, Any]]:
+        return self._import_val.validation_history(limit)
+
+    def iv_summary(self) -> Dict[str, Any]:
+        return self._import_val.summary()
+
+    def iv_report(self) -> str:
+        return self._import_val.report_text()
