@@ -22,6 +22,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
+from snapshot_test import SnapshotTestFramework
+
 
 @dataclass
 class DataPoint:
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._snapshot_test = SnapshotTestFramework()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,30 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def snap_test(self, name: str, data: Any) -> bool:
+        return self._snapshot_test.test(name, data)
+
+    def snap_test_batch(self, snapshots: Dict[str, Any]) -> Dict[str, bool]:
+        return self._snapshot_test.test_batch(snapshots)
+
+    def snap_approve_all(self) -> int:
+        return self._snapshot_test.approve_all()
+
+    def snap_approve(self, name: str, data: Any) -> None:
+        self._snapshot_test.approve(name, data)
+
+    def snap_diff(self, name: str, data: Any) -> str:
+        return self._snapshot_test.diff(name, data)
+
+    def snap_list(self) -> List[str]:
+        return self._snapshot_test.list_snapshots()
+
+    def snap_delete(self, name: str) -> bool:
+        return self._snapshot_test.delete_snapshot(name)
+
+    def snap_summary(self) -> Dict[str, Any]:
+        return self._snapshot_test.summary()
+
+    def snap_export_artifacts(self, dir: str) -> List[str]:
+        return self._snapshot_test.export_artifacts(dir)
