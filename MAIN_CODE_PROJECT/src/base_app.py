@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 import json
 import math
 import os
@@ -21,6 +21,8 @@ from json_depth_guard import safe_json_loads
 from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
+
+from cli_generator import CLIGeneratorEngine
 
 
 @dataclass
@@ -117,6 +119,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._cli_gen = CLIGeneratorEngine('BaseApp')
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -375,3 +378,32 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self._time_it('export_state'):
             self.export_state()
         self.log('Finalized successfully')
+
+    def cli_register(self, name: str, fn: Callable[..., Any],
+                     description: str = '', aliases: Optional[List[str]] = None) -> Any:
+        return self._cli_gen.register_command(name, fn, description, aliases)
+
+    def cli_register_self(self) -> int:
+        return self._cli_gen.register_from_instance(self, prefix='')
+
+    def cli_remove(self, name: str) -> bool:
+        return self._cli_gen.remove_command(name)
+
+    def cli_list(self) -> List[str]:
+        return self._cli_gen.list_commands()
+
+    def cli_run(self, line: str) -> Dict[str, Any]:
+        return self._cli_gen.run_line(line)
+
+    def cli_repl(self) -> None:
+        self.cli_register_self()
+        self._cli_gen.run_interactive(banner='=== BaseApp CLI REPL ===')
+
+    def cli_history(self, limit: int = 100) -> List[Dict[str, Any]]:
+        return self._cli_gen.history.entries(limit)
+
+    def cli_summary(self) -> Dict[str, Any]:
+        return self._cli_gen.summary()
+
+    def cli_report(self) -> str:
+        return self._cli_gen.report_text()
