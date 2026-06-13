@@ -620,3 +620,24 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
+        self._pinner.pin_host(host, fingerprints)
+
+    def tls_unpin_host(self, host: str) -> None:
+        self._pinner.unpin_host(host)
+
+    def tls_rotate_pins(self, host: str, new_fingerprints: List[str], keep_old: bool = True) -> None:
+        self._pinner.rotate_host(host, new_fingerprints, keep_old)
+
+    def tls_validate(self, host: str, port: int = 443) -> bool:
+        return self._pinner.validate(host, port)
+
+    def tls_request(self, url: str, method: str = 'GET', headers: Optional[Dict[str, str]] = None, data: Optional[bytes] = None, timeout: int = 30) -> Optional[bytes]:
+        return self._pinner.validated_request(url, method, headers, data, timeout)
+
+    def tls_audit_log(self, n: int = 10) -> List[Dict[str, str]]:
+        return self._pinner.audit_log(n)
+
+    def tls_audit_clear(self) -> None:
+        self._pinner.audit_clear()
