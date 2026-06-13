@@ -24,6 +24,8 @@ from decimal_utils import Money, safe_decimal
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
 
+from canary_deploy import CanaryEngine
+
 
 @dataclass
 class DataPoint:
@@ -123,7 +125,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
+        self._canary = CanaryEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +623,38 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    def cn_register(self, module: str, stable_fn: Callable[..., Any],
+                    canary_fn: Callable[..., Any]) -> None:
+        self._canary.register_version(module, stable_fn, canary_fn)
+
+    def cn_start(self, module: str, version: str, pct: float = 10.0) -> Any:
+        return self._canary.start_deployment(module, version, pct)
+
+    def cn_execute(self, module: str, *args: Any,
+                   dep_id: Optional[str] = None, **kwargs: Any) -> Any:
+        return self._canary.execute(module, *args, deployment_id=dep_id, **kwargs)
+
+    def cn_evaluate(self, dep_id: str) -> Tuple[bool, str]:
+        return self._canary.evaluate_deployment(dep_id)
+
+    def cn_rollback(self, dep_id: str, reason: str = 'manual') -> bool:
+        return self._canary.rollback_deployment(dep_id, reason)
+
+    def cn_promote(self, dep_id: str) -> bool:
+        return self._canary.promote_deployment(dep_id)
+
+    def cn_list(self) -> List[Dict[str, Any]]:
+        return self._canary.list_deployments()
+
+    def cn_detail(self, dep_id: str) -> Optional[Dict[str, Any]]:
+        return self._canary.deployment_detail(dep_id)
+
+    def cn_summary(self) -> Dict[str, Any]:
+        return self._canary.summary()
+
+    def cn_report(self) -> str:
+        return self._canary.report_text()
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
