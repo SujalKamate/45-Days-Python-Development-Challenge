@@ -258,6 +258,18 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
     def close_concurrent(self) -> None:
         self._concurrent.close()
 
+    def rate_acquire(self, key: str = 'default') -> None:
+        self._rate_limiter.acquire(key)
+
+    def rate_try_acquire(self, key: str = 'default') -> bool:
+        return self._rate_limiter.try_acquire(key)
+
+    def rate_configure(self, key: str, rate: float, capacity: int) -> None:
+        self._rate_limiter.configure(key, rate, capacity)
+
+    def rate_reset(self) -> None:
+        self._rate_limiter.reset()
+
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
         self.state.flags[key] = not current
