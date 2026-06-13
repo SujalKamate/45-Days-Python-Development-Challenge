@@ -5,7 +5,7 @@ from copy import deepcopy as _deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 import json
 import math
 import os
@@ -23,6 +23,8 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
+
+from health_check import HealthCheckEngine
 
 
 @dataclass
@@ -123,7 +125,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
+        self._health = HealthCheckEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +623,42 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    def hc_liveness(self) -> Any:
+        return self._health.liveness()
+
+    def hc_readiness(self) -> Any:
+        return self._health.readiness()
+
+    def hc_live_report(self) -> Dict[str, Any]:
+        return self._health.liveness().to_dict()
+
+    def hc_ready_report(self) -> Dict[str, Any]:
+        return self._health.readiness().to_dict()
+
+    def hc_register_module(self, name: str) -> None:
+        self._health.module_checker.add_required(name)
+
+    def hc_record_execution(self, module_name: str) -> None:
+        self._health.record_execution(module_name)
+
+    def hc_set_sample_fn(self, fn: Callable[[], Any]) -> None:
+        self._health.sample_checker.set_sample_fn(fn)
+
+    def hc_add_dependency(self, name: str, host: str, port: int, timeout: float = 2.0) -> None:
+        self._health.dependency_checker.add_network_probe(name, host, port, timeout)
+
+    def hc_start_server(self, host: str = '0.0.0.0', port: int = 8901) -> None:
+        self._health.start_endpoint(host, port)
+
+    def hc_stop_server(self) -> None:
+        self._health.stop_endpoint()
+
+    def hc_summary(self) -> Dict[str, Any]:
+        return self._health.summary()
+
+    def hc_report(self) -> str:
+        return self._health.report_text()
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
