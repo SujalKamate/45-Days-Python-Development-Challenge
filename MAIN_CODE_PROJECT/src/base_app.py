@@ -276,6 +276,24 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
     def spec_map(self, fns: List) -> List[Any]:
         return self._hedged.map(fns)
 
+    def sync_register(self, name: str) -> None:
+        self._coordinator.register(name)
+
+    def sync_unregister(self, name: str) -> None:
+        self._coordinator.unregister(name)
+
+    def sync_define_phases(self, phases: List[str]) -> None:
+        self._coordinator.define_phases(phases)
+
+    def sync_wait(self, phase: str) -> None:
+        self._coordinator.wait(phase, type(self).__name__)
+
+    def sync_set(self, key: str, value: Any) -> None:
+        self._coordinator.set_phase_data(key, value)
+
+    def sync_get(self, key: str) -> Optional[Any]:
+        return self._coordinator.get_phase_data(key)
+
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
         self.state.flags[key] = not current
