@@ -24,6 +24,8 @@ from decimal_utils import Money, safe_decimal
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
 
+from predictive_cache import PredictiveCacheEngine
+
 
 @dataclass
 class DataPoint:
@@ -123,7 +125,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
+        self._pred_cache = PredictiveCacheEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +623,28 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    def pc_record(self, key: str, module: str = '', access_type: str = 'read') -> None:
+        self._pred_cache.record_access(key, module, access_type)
+
+    def pc_predict(self, loader: Callable[[str], Any], top_n: int = 10,
+                   context_key: Optional[str] = None) -> List[str]:
+        return self._pred_cache.predict_and_preload(loader, top_n, context_key)
+
+    def pc_get(self, key: str, loader: Optional[Callable[[str], Any]] = None) -> Any:
+        return self._pred_cache.get(key, loader)
+
+    def pc_record_cycle(self, keys: List[str], module: str = '') -> None:
+        self._pred_cache.record_cycle(keys, module)
+
+    def pc_hit_rate(self) -> float:
+        return self._pred_cache.cache.hit_rate
+
+    def pc_summary(self) -> Dict[str, Any]:
+        return self._pred_cache.summary()
+
+    def pc_report(self) -> str:
+        return self._pred_cache.report_text()
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
