@@ -24,6 +24,8 @@ from decimal_utils import Money, safe_decimal
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
 
+from refinement_types import ContractEngine
+
 
 @dataclass
 class DataPoint:
@@ -123,7 +125,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
+        self._contract = ContractEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +623,39 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    def ct_refine(self, base_type: type, predicate: Callable[[Any], bool],
+                  name: str = '') -> Any:
+        return self._contract.refine(base_type, predicate, name)
+
+    def ct_check(self, value: Any, refined_type: Any, label: str = 'value') -> Any:
+        return self._contract.check_value(value, refined_type, label)
+
+    def ct_require(self, fn: Callable[..., Any],
+                   predicate: Callable[..., bool],
+                   desc: str = '') -> Callable[..., Any]:
+        return self._contract.require(fn, predicate, desc)
+
+    def ct_ensure(self, fn: Callable[..., Any],
+                  predicate: Callable[[Any], bool],
+                  desc: str = '') -> Callable[..., Any]:
+        return self._contract.ensure(fn, predicate, desc)
+
+    def ct_invariant(self, cls: type, predicate: Callable[[Any], bool],
+                     desc: str = '') -> type:
+        return self._contract.invariant(cls, predicate, desc)
+
+    def ct_set_enabled(self, enabled: bool) -> None:
+        self._contract.set_enabled(enabled)
+
+    def ct_violations(self) -> List[Dict[str, Any]]:
+        return self._contract.violation_history()
+
+    def ct_summary(self) -> Dict[str, Any]:
+        return self._contract.summary()
+
+    def ct_report(self) -> str:
+        return self._contract.report_text()
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
