@@ -89,7 +89,7 @@ from merkle_tree import MerkleTree, IncrementalStateReplicator
 
 @dataclass
 class BaseAppState:
-    history: List[str] = field(default_factory=list)
+    history: HistoryStore = field(default_factory=lambda: HistoryStore(1000))
     records: Dict[str, Any] = field(default_factory=dict)
     flags: Dict[str, bool] = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.utcnow)
@@ -131,9 +131,19 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         stamp = datetime.now().strftime('%H:%M:%S')
         entry = f'[{stamp}] {message}'
         self.state.history.append(entry)
-        if len(self.state.history) > self.state.max_history:
-            del self.state.history[:len(self.state.history) - self.state.max_history]
         print(entry)
+
+    def event_publish(self, event_type: str, message: str, data: Any = None) -> bool:
+        return self._event_bus.publish(event_type, type(self).__name__, message, data)
+
+    def event_subscribe(self, event_type: str, handler) -> None:
+        self._event_bus.subscribe(event_type, handler)
+
+    def event_dispatch(self) -> int:
+        return self._event_bus.dispatch()
+
+    def flush_events(self) -> None:
+        self._event_log.flush()
 
     def rotate_logs(self, keep: int = 50) -> None:
         from pathlib import Path
@@ -206,7 +216,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def save_json(self, name: str, payload: Dict[str, Any]) -> Path:
         path = self.output_dir / self._guard.qualify(name)
-        path.write_text(json.dumps(payload, indent=2, default=str), encoding='utf-8')
+        encrypted = self._aead.encrypt_state(payload)
+        path.write_bytes(encrypted)
         return path
 
     def load_json(self, path: Path) -> Dict[str, Any]:
@@ -214,9 +225,21 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         if not path.exists():
             return {}
         try:
-            return FileManager.read_json(path)
+            return self._aead.decrypt_state(path.read_bytes())
         except Exception:
             return {}
+
+    def aead_export_key(self, path: str) -> None:
+        self._aead.export_key(path)
+
+    def aead_rotate_key(self, payload_path: str, new_key_path: str) -> bytes:
+        new_key = AEADStore.load_key(new_key_path)
+        data = Path(payload_path).read_bytes()
+        return self._aead.rotate_key(data, new_key)
+
+    @staticmethod
+    def aead_load_key(path: str) -> bytes:
+        return AEADStore.load_key(path)
 
     def save_text(self, name: str, content: str) -> Path:
         path = self.output_dir / self._guard.qualify(name)
@@ -233,6 +256,148 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         with self.state._lock:
             self._wal.log_update('main', key, old_value, value)
             self.state.records[key] = _deepcopy(value)
+
+    def parallel_map(self, fn, items: List[Any]) -> List[Any]:
+        return self._executor.execute_batch(items, fn)
+
+    def parallel_run(self, fns: List) -> List[Any]:
+        return self._executor.run_in_parallel(fns)
+
+    def parallel_execute(self, fn) -> int:
+        return self._executor.execute(fn)
+
+    def shutdown_executor(self) -> None:
+        self._executor.shutdown()
+
+    def concurrent_gather(self, fns: List) -> List[Any]:
+        return self._concurrent.gather(fns)
+
+    def concurrent_run(self, fn, name: str = '') -> Any:
+        task = self._concurrent.run(fn, name)
+        return task.wait()
+
+    def cancel_concurrent(self) -> None:
+        self._concurrent.cancel_all()
+
+    def close_concurrent(self) -> None:
+        self._concurrent.close()
+
+    def rate_acquire(self, key: str = 'default') -> None:
+        self._rate_limiter.acquire(key)
+
+    def rate_try_acquire(self, key: str = 'default') -> bool:
+        return self._rate_limiter.try_acquire(key)
+
+    def rate_configure(self, key: str, rate: float, capacity: int) -> None:
+        self._rate_limiter.configure(key, rate, capacity)
+
+    def rate_reset(self) -> None:
+        self._rate_limiter.reset()
+
+    def spec_execute(self, fn) -> Any:
+        return self._hedged.execute(fn)
+
+    def spec_map(self, fns: List) -> List[Any]:
+        return self._hedged.map(fns)
+
+    def sync_register(self, name: str) -> None:
+        self._coordinator.register(name)
+
+    def sync_unregister(self, name: str) -> None:
+        self._coordinator.unregister(name)
+
+    def sync_define_phases(self, phases: List[str]) -> None:
+        self._coordinator.define_phases(phases)
+
+    def sync_wait(self, phase: str) -> None:
+        self._coordinator.wait(phase, type(self).__name__)
+
+    def sync_set(self, key: str, value: Any) -> None:
+        self._coordinator.set_phase_data(key, value)
+
+    def sync_get(self, key: str) -> Optional[Any]:
+        return self._coordinator.get_phase_data(key)
+
+    def pipe_map(self, fn, name: str = 'map') -> LazyPipeline:
+        return LazyPipeline().map(fn, name)
+
+    def pipe_filter(self, predicate, name: str = 'filter') -> LazyPipeline:
+        return LazyPipeline().filter(predicate, name)
+
+    def pipe_run(self, name: str, data: List[Any]) -> List[Any]:
+        return self._pipeline.run(name, data)
+
+    def pipe_register(self, name: str, pipeline: LazyPipeline) -> None:
+        self._pipeline.register(name, pipeline)
+
+    def pipe_transform(self, data: List[Any], transforms) -> List[Any]:
+        pipeline = LazyPipeline(iter(data))
+        for name, fn in transforms:
+            pipeline.map(fn, name)
+        return pipeline.collect()
+
+    def ckpt_pipeline(self, run_id: str = 'default') -> CheckpointedPipeline:
+        pipeline = CheckpointedPipeline(self.output_dir / '.checkpoints', run_id)
+        return pipeline
+
+    def ckpt_run(self, stages: List[Tuple[str, Callable]], initial: Any = None,
+                 run_id: str = 'default') -> Any:
+        pipeline = self.ckpt_pipeline(run_id)
+        for name, fn in stages:
+            pipeline.add_stage(name, fn)
+        return pipeline.run(initial)
+
+    def ckpt_resume(self, run_id: str = 'default') -> Optional[str]:
+        store = CheckpointStore(self.output_dir / '.checkpoints')
+        ckpt = store.last_checkpoint(run_id)
+        return ckpt.stage_name if ckpt else None
+
+    def ckpt_clear(self, run_id: str = 'default') -> None:
+        store = CheckpointStore(self.output_dir / '.checkpoints')
+        store.clear_run(run_id)
+
+    def batch_process(self, items: List[Any], processor_fn) -> List[Any]:
+        adapter = AdaptiveBatchProcessor(processor_fn)
+        return adapter.process(items)
+
+    def batch_current_size(self) -> int:
+        return self._adaptive_batcher.current
+
+    def batch_update(self, batch_size: int, elapsed: float) -> None:
+        self._adaptive_batcher.update(batch_size, elapsed)
+
+    def batch_resize(self, min_batch: int = 1, max_batch: int = 1024) -> None:
+        self._adaptive_batcher.resize(min_batch, max_batch)
+
+    def prov_entity(self, name: str = '', **attrs) -> str:
+        return self._provenance.entity(name=name, **attrs)
+
+    def prov_activity(self, name: str = '', **attrs) -> str:
+        return self._provenance.activity(name=name, **attrs)
+
+    def prov_agent(self, name: str = '', **attrs) -> str:
+        return self._provenance.agent(name=name, **attrs)
+
+    def prov_derivation(self, derived: str, source: str, activity: str = '') -> None:
+        self._provenance.derivation(derived, source, activity)
+
+    def prov_lineage(self, entity_id: str) -> List[Dict[str, Any]]:
+        return self._provenance.lineage(entity_id)
+
+    def prov_export(self, path: str) -> None:
+        self._provenance.export_json(path)
+
+    def prov_clear(self) -> None:
+        self._provenance.clear()
+
+    def secret_split(self, label: str, secret: bytes) -> List[str]:
+        return self._key_manager.create(label, secret)
+
+    def secret_recover(self, label: str, share_indices: List[int]) -> bytes:
+        return self._key_manager.recover(label, share_indices)
+
+    def secret_rotate(self, label: str, share_indices: List[int]) -> List[str]:
+        return self._key_manager.rotate(label, share_indices)
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
@@ -264,7 +429,13 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         }
 
     def history_tail(self, count: int = 5) -> List[str]:
-        return self.state.history[-count:]
+        return self.state.history.tail(count)
+
+    def history_frequencies(self) -> Dict[str, int]:
+        return self.state.history._cache.frequencies()
+
+    def history_resize(self, new_max: int) -> int:
+        return self.state.history._cache.resize(new_max)
 
     @staticmethod
     def _compute_checksum(data: Dict[str, Any]) -> str:
