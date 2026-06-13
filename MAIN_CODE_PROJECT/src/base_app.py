@@ -270,6 +270,12 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
     def rate_reset(self) -> None:
         self._rate_limiter.reset()
 
+    def spec_execute(self, fn) -> Any:
+        return self._hedged.execute(fn)
+
+    def spec_map(self, fns: List) -> List[Any]:
+        return self._hedged.map(fns)
+
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
         self.state.flags[key] = not current
