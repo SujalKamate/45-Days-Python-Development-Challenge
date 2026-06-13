@@ -306,6 +306,24 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
     def sync_get(self, key: str) -> Optional[Any]:
         return self._coordinator.get_phase_data(key)
 
+    def pipe_map(self, fn, name: str = 'map') -> LazyPipeline:
+        return LazyPipeline().map(fn, name)
+
+    def pipe_filter(self, predicate, name: str = 'filter') -> LazyPipeline:
+        return LazyPipeline().filter(predicate, name)
+
+    def pipe_run(self, name: str, data: List[Any]) -> List[Any]:
+        return self._pipeline.run(name, data)
+
+    def pipe_register(self, name: str, pipeline: LazyPipeline) -> None:
+        self._pipeline.register(name, pipeline)
+
+    def pipe_transform(self, data: List[Any], transforms) -> List[Any]:
+        pipeline = LazyPipeline(iter(data))
+        for name, fn in transforms:
+            pipeline.map(fn, name)
+        return pipeline.collect()
+
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
         self.state.flags[key] = not current
