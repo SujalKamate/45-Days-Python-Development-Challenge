@@ -614,6 +614,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.report_metrics()
 
     def finalize(self) -> None:
+        self._entropy.stop_monitoring()
         with self._time_it('export_state'):
             self.export_state()
         with self.state._lock:
