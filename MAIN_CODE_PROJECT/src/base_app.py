@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from copy import deepcopy as _deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,6 +22,7 @@ from json_depth_guard import safe_json_loads
 from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
+from file_manager import FileManage
 
 from lua_sandbox import ScriptStore
 
@@ -83,15 +85,18 @@ try:
 except ImportError:
     from contracts import DataProvider, DataProcessor, AppRunner  # type: ignore[import-untyped]
 
+from merkle_tree import MerkleTree, IncrementalStateReplicator
+
 
 @dataclass
 class BaseAppState:
-    history: List[str] = field(default_factory=list)
+    history: HistoryStore = field(default_factory=lambda: HistoryStore(1000))
     records: Dict[str, Any] = field(default_factory=dict)
     flags: Dict[str, bool] = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.utcnow)
     runs: int = 0
     errors: int = 0
+    max_history: int = 1000
     perf_metrics: Dict[str, List[float]] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _next_id: int = 0
@@ -127,9 +132,19 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         stamp = datetime.now().strftime('%H:%M:%S')
         entry = f'[{stamp}] {message}'
         self.state.history.append(entry)
-        if len(self.state.history) > self.state.max_history:
-            del self.state.history[:len(self.state.history) - self.state.max_history]
         print(entry)
+
+    def event_publish(self, event_type: str, message: str, data: Any = None) -> bool:
+        return self._event_bus.publish(event_type, type(self).__name__, message, data)
+
+    def event_subscribe(self, event_type: str, handler) -> None:
+        self._event_bus.subscribe(event_type, handler)
+
+    def event_dispatch(self) -> int:
+        return self._event_bus.dispatch()
+
+    def flush_events(self) -> None:
+        self._event_log.flush()
 
     def rotate_logs(self, keep: int = 50) -> None:
         from pathlib import Path
@@ -202,7 +217,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def save_json(self, name: str, payload: Dict[str, Any]) -> Path:
         path = self.output_dir / self._guard.qualify(name)
-        path.write_text(json.dumps(payload, indent=2, default=str), encoding='utf-8')
+        encrypted = self._aead.encrypt_state(payload)
+        path.write_bytes(encrypted)
         return path
 
     def load_json(self, path: Path) -> Dict[str, Any]:
@@ -210,9 +226,21 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         if not path.exists():
             return {}
         try:
-            return FileManager.read_json(path)
+            return self._aead.decrypt_state(path.read_bytes())
         except Exception:
             return {}
+
+    def aead_export_key(self, path: str) -> None:
+        self._aead.export_key(path)
+
+    def aead_rotate_key(self, payload_path: str, new_key_path: str) -> bytes:
+        new_key = AEADStore.load_key(new_key_path)
+        data = Path(payload_path).read_bytes()
+        return self._aead.rotate_key(data, new_key)
+
+    @staticmethod
+    def aead_load_key(path: str) -> bytes:
+        return AEADStore.load_key(path)
 
     def save_text(self, name: str, content: str) -> Path:
         path = self.output_dir / self._guard.qualify(name)
@@ -225,7 +253,152 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             return ''
 
     def record(self, key: str, value: Any) -> None:
-        self.state.records[key] = copy.deepcopy(value)
+        old_value = self.state.records.get(key)
+        with self.state._lock:
+            self._wal.log_update('main', key, old_value, value)
+            self.state.records[key] = _deepcopy(value)
+
+    def parallel_map(self, fn, items: List[Any]) -> List[Any]:
+        return self._executor.execute_batch(items, fn)
+
+    def parallel_run(self, fns: List) -> List[Any]:
+        return self._executor.run_in_parallel(fns)
+
+    def parallel_execute(self, fn) -> int:
+        return self._executor.execute(fn)
+
+    def shutdown_executor(self) -> None:
+        self._executor.shutdown()
+
+    def concurrent_gather(self, fns: List) -> List[Any]:
+        return self._concurrent.gather(fns)
+
+    def concurrent_run(self, fn, name: str = '') -> Any:
+        task = self._concurrent.run(fn, name)
+        return task.wait()
+
+    def cancel_concurrent(self) -> None:
+        self._concurrent.cancel_all()
+
+    def close_concurrent(self) -> None:
+        self._concurrent.close()
+
+    def rate_acquire(self, key: str = 'default') -> None:
+        self._rate_limiter.acquire(key)
+
+    def rate_try_acquire(self, key: str = 'default') -> bool:
+        return self._rate_limiter.try_acquire(key)
+
+    def rate_configure(self, key: str, rate: float, capacity: int) -> None:
+        self._rate_limiter.configure(key, rate, capacity)
+
+    def rate_reset(self) -> None:
+        self._rate_limiter.reset()
+
+    def spec_execute(self, fn) -> Any:
+        return self._hedged.execute(fn)
+
+    def spec_map(self, fns: List) -> List[Any]:
+        return self._hedged.map(fns)
+
+    def sync_register(self, name: str) -> None:
+        self._coordinator.register(name)
+
+    def sync_unregister(self, name: str) -> None:
+        self._coordinator.unregister(name)
+
+    def sync_define_phases(self, phases: List[str]) -> None:
+        self._coordinator.define_phases(phases)
+
+    def sync_wait(self, phase: str) -> None:
+        self._coordinator.wait(phase, type(self).__name__)
+
+    def sync_set(self, key: str, value: Any) -> None:
+        self._coordinator.set_phase_data(key, value)
+
+    def sync_get(self, key: str) -> Optional[Any]:
+        return self._coordinator.get_phase_data(key)
+
+    def pipe_map(self, fn, name: str = 'map') -> LazyPipeline:
+        return LazyPipeline().map(fn, name)
+
+    def pipe_filter(self, predicate, name: str = 'filter') -> LazyPipeline:
+        return LazyPipeline().filter(predicate, name)
+
+    def pipe_run(self, name: str, data: List[Any]) -> List[Any]:
+        return self._pipeline.run(name, data)
+
+    def pipe_register(self, name: str, pipeline: LazyPipeline) -> None:
+        self._pipeline.register(name, pipeline)
+
+    def pipe_transform(self, data: List[Any], transforms) -> List[Any]:
+        pipeline = LazyPipeline(iter(data))
+        for name, fn in transforms:
+            pipeline.map(fn, name)
+        return pipeline.collect()
+
+    def ckpt_pipeline(self, run_id: str = 'default') -> CheckpointedPipeline:
+        pipeline = CheckpointedPipeline(self.output_dir / '.checkpoints', run_id)
+        return pipeline
+
+    def ckpt_run(self, stages: List[Tuple[str, Callable]], initial: Any = None,
+                 run_id: str = 'default') -> Any:
+        pipeline = self.ckpt_pipeline(run_id)
+        for name, fn in stages:
+            pipeline.add_stage(name, fn)
+        return pipeline.run(initial)
+
+    def ckpt_resume(self, run_id: str = 'default') -> Optional[str]:
+        store = CheckpointStore(self.output_dir / '.checkpoints')
+        ckpt = store.last_checkpoint(run_id)
+        return ckpt.stage_name if ckpt else None
+
+    def ckpt_clear(self, run_id: str = 'default') -> None:
+        store = CheckpointStore(self.output_dir / '.checkpoints')
+        store.clear_run(run_id)
+
+    def batch_process(self, items: List[Any], processor_fn) -> List[Any]:
+        adapter = AdaptiveBatchProcessor(processor_fn)
+        return adapter.process(items)
+
+    def batch_current_size(self) -> int:
+        return self._adaptive_batcher.current
+
+    def batch_update(self, batch_size: int, elapsed: float) -> None:
+        self._adaptive_batcher.update(batch_size, elapsed)
+
+    def batch_resize(self, min_batch: int = 1, max_batch: int = 1024) -> None:
+        self._adaptive_batcher.resize(min_batch, max_batch)
+
+    def prov_entity(self, name: str = '', **attrs) -> str:
+        return self._provenance.entity(name=name, **attrs)
+
+    def prov_activity(self, name: str = '', **attrs) -> str:
+        return self._provenance.activity(name=name, **attrs)
+
+    def prov_agent(self, name: str = '', **attrs) -> str:
+        return self._provenance.agent(name=name, **attrs)
+
+    def prov_derivation(self, derived: str, source: str, activity: str = '') -> None:
+        self._provenance.derivation(derived, source, activity)
+
+    def prov_lineage(self, entity_id: str) -> List[Dict[str, Any]]:
+        return self._provenance.lineage(entity_id)
+
+    def prov_export(self, path: str) -> None:
+        self._provenance.export_json(path)
+
+    def prov_clear(self) -> None:
+        self._provenance.clear()
+
+    def secret_split(self, label: str, secret: bytes) -> List[str]:
+        return self._key_manager.create(label, secret)
+
+    def secret_recover(self, label: str, share_indices: List[int]) -> bytes:
+        return self._key_manager.recover(label, share_indices)
+
+    def secret_rotate(self, label: str, share_indices: List[int]) -> List[str]:
+        return self._key_manager.rotate(label, share_indices)
 
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
@@ -257,14 +430,37 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         }
 
     def history_tail(self, count: int = 5) -> List[str]:
-        return self.state.history[-count:]
+        return self.state.history.tail(count)
+
+    def history_frequencies(self) -> Dict[str, int]:
+        return self.state.history._cache.frequencies()
+
+    def history_resize(self, new_max: int) -> int:
+        return self.state.history._cache.resize(new_max)
 
     @staticmethod
     def _compute_checksum(data: Dict[str, Any]) -> str:
         canonical = json.dumps(data, sort_keys=True, default=str)
         return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
 
+    @staticmethod
+    def _describe_value(value: Any) -> str:
+        if isinstance(value, (str, bytes)):
+            v = str(value)
+            return repr(v[:50]) + ('...' if len(v) > 50 else '')
+        if isinstance(value, (int, float, bool)):
+            return str(value)
+        if isinstance(value, (list, tuple)):
+            return f'{type(value).__name__}[{len(value)}]'
+        if isinstance(value, dict):
+            return f'dict[{len(value)}]'
+        if isinstance(value, set):
+            return f'set[{len(value)}]'
+        return type(value).__name__
+
     def export_state(self) -> Path:
+        records_snapshot = dict(self.state.records)
+        merkle_root = self._replicator.snapshot(records_snapshot)
         payload = {
             'version': 1,
             'exported_at': datetime.now(timezone.utc).isoformat(),
@@ -280,11 +476,48 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
                 'history_count': len(self.state.history),
             },
             'metadata': {
-                'records_summary': {k: self._describe_value(v) for k, v in list(self.state.records.items())[:20]},
+                'records_snapshot': records_snapshot,
                 'flags': dict(self.state.flags),
             },
+            'merkle_root': merkle_root,
         }
         return self.save_json('state.json', payload)
+
+    def verify_state(self, path: Optional[Path] = None) -> bool:
+        path = path or self.output_dir / self._guard.qualify('state.json')
+        data = self.load_json(path)
+        stored_root = data.get('merkle_root', '')
+        if not stored_root:
+            return True
+        metadata = data.get('metadata', {})
+        records_snapshot = metadata.get('records_snapshot', {})
+        return self._replicator.verify_state(records_snapshot, stored_root)
+
+    def export_delta(self, name: str = 'state_delta.json') -> Path:
+        records_export = dict(self.state.records)
+        new_root, delta = self._replicator.compute_delta(records_export)
+        if not delta:
+            return self.save_json(name, {'merkle_root': new_root, 'delta': {}})
+        payload = {
+            'merkle_root': new_root,
+            'delta': delta,
+            'exported_at': datetime.now(timezone.utc).isoformat(),
+        }
+        return self.save_json(name, payload)
+
+    def import_delta(self, path: Path) -> bool:
+        data = self.load_json(path)
+        if not data:
+            return False
+        delta = data.get('delta', {})
+        expected_root = data.get('merkle_root', '')
+        base_data = dict(self.state.records)
+        try:
+            merged = self._replicator.apply_delta(base_data, delta, expected_root)
+            self.state.records = merged
+            return True
+        except ValueError:
+            return False
 
     def _report_data(self) -> Dict[str, Any]:
         return {
@@ -294,8 +527,6 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             'flags': len(self.state.flags),
             'history_entries': len(self.state.history),
         }
-        payload['_checksum'] = self._compute_checksum(payload)
-        return self.save_json('state.json', payload)
 
     @contextmanager
     def _time_it(self, label: str) -> Generator[None, None, None]:
@@ -314,6 +545,13 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             avg = sum(timings) / len(timings)
             total = sum(timings)
             print(self.format_kv(label, f'{avg*1000:.1f}ms avg ({total*1000:.1f}ms total, {len(timings)} call(s))'))
+
+    def format_report(self) -> str:
+        data = self._report_data()
+        lines = [f'Runs: {data["runs"]}', f'Errors: {data["errors"]}',
+                 f'Records: {data["records"]}', f'Flags: {data["flags"]}',
+                 f'History entries: {data["history_entries"]}']
+        return '\n'.join(lines)
 
     def display_report(self) -> None:
         print(self.format_report())
@@ -364,6 +602,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def run(self) -> None:
         self.state.runs += 1
+        self._wal.begin_txn('main')
         self.section('Processing')
         with self._time_it('dataset'):
             items = self.dataset()
@@ -375,8 +614,12 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.report_metrics()
 
     def finalize(self) -> None:
+        self._entropy.stop_monitoring()
         with self._time_it('export_state'):
             self.export_state()
+        with self.state._lock:
+            self._wal.write_checkpoint(dict(self.state.records))
+        self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
     def lua_save_script(self, name: str, script: str) -> str:
