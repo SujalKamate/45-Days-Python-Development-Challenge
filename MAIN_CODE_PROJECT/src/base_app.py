@@ -24,6 +24,8 @@ from decimal_utils import Money, safe_decimal
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
 
+from algebraic_effects import AlgebraicEffectsEngine
+
 
 @dataclass
 class DataPoint:
@@ -123,7 +125,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
+        self._effects = AlgebraicEffectsEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +623,32 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    def ae_register(self, effect_type: str,
+                    handler_fn: Optional[Callable[[Any], Any]] = None) -> None:
+        self._effects.register_handler(effect_type, handler_fn)
+
+    def ae_effect(self, effect_type: str, payload: Any = None) -> Any:
+        return self._effects.effect(effect_type, payload)
+
+    def ae_io(self, operation: str, path: str = '', data: Any = None) -> Any:
+        return self._effects.io_effect(operation, path, data)
+
+    def ae_timeout(self, duration_s: float, context: str = '') -> Any:
+        return self._effects.timeout_effect(duration_s, context)
+
+    def ae_validation(self, field: str, value: Any, reason: str = '') -> Any:
+        return self._effects.validation_effect(field, value, reason)
+
+    def ae_process(self, gen_fn: Callable[..., Any],
+                   *args: Any, **kwargs: Any) -> Any:
+        return self._effects.process(gen_fn, *args, **kwargs)
+
+    def ae_summary(self) -> Dict[str, Any]:
+        return self._effects.summary()
+
+    def ae_report(self) -> str:
+        return self._effects.report_text()
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
