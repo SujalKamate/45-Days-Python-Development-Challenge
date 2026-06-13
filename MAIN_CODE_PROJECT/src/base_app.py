@@ -24,6 +24,8 @@ from decimal_utils import Money, safe_decimal
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
 
+from deadline_context import DeadlineContextEngine
+
 
 @dataclass
 class DataPoint:
@@ -123,7 +125,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
+        self._deadline_ctx = DeadlineContextEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +623,38 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    def dc_create(self, deadline_s: float = 0,
+                  metadata: Optional[Dict[str, Any]] = None) -> Any:
+        return self._deadline_ctx.create_context(deadline_s, metadata)
+
+    def dc_child(self, deadline_s: float = 0,
+                 metadata: Optional[Dict[str, Any]] = None) -> Optional[Any]:
+        return self._deadline_ctx.create_child_context(deadline_s, metadata)
+
+    def dc_current(self) -> Optional[Any]:
+        return self._deadline_ctx.current_context()
+
+    def dc_clear(self) -> None:
+        self._deadline_ctx.clear_context()
+
+    def dc_execute(self, fn: Callable[..., Any], *args: Any,
+                   deadline_s: float = 0,
+                   context: Optional[Any] = None, **kwargs: Any) -> Any:
+        return self._deadline_ctx.execute(fn, *args, deadline_s=deadline_s,
+                                          context=context, **kwargs)
+
+    def dc_check(self, min_remaining: float = 0.1) -> None:
+        self._deadline_ctx.check_deadline(min_remaining)
+
+    def dc_has_time(self, required_s: float = 1.0) -> bool:
+        return self._deadline_ctx.has_time(required_s)
+
+    def dc_summary(self) -> Dict[str, Any]:
+        return self._deadline_ctx.summary()
+
+    def dc_report(self) -> str:
+        return self._deadline_ctx.report_text()
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
