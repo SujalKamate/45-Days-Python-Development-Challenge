@@ -24,6 +24,8 @@ from decimal_utils import Money, safe_decimal
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
 
+from formal_verify import FormalVerifyEngine
+
 
 @dataclass
 class DataPoint:
@@ -123,7 +125,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
+        self._formal = FormalVerifyEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +623,38 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    def fv_register(self, name: str, constraint: Callable[[Dict[str, Any]], bool],
+                    desc: str = '', severity: str = 'error') -> Any:
+        return self._formal.register_invariant(name, constraint, desc, severity)
+
+    def fv_verify(self, state: Dict[str, Any],
+                  invariants: Optional[List[str]] = None) -> Dict[str, Any]:
+        return self._formal.verify_state(state, invariants)
+
+    def fv_symbolic(self, initial: Dict[str, Any],
+                    workflow: Callable[[Dict[str, Any]], Dict[str, Any]],
+                    symbolic_keys: Optional[List[str]] = None,
+                    max_paths: int = 100) -> Dict[str, Any]:
+        return self._formal.symbolic_verify(initial, workflow, symbolic_keys, max_paths)
+
+    def fv_bounded(self, loop_body: Callable[[Dict[str, Any]], Dict[str, Any]],
+                   initial: Dict[str, Any], invariant: str,
+                   loop_var: str = 'i', max_unwind: int = 10) -> Dict[str, Any]:
+        return self._formal.bounded_check(loop_body, initial, invariant, loop_var, max_unwind)
+
+    def fv_certify(self, module: str, version: str,
+                   state: Dict[str, Any]) -> Any:
+        return self._formal.generate_certificate(module, version, state)
+
+    def fv_counterexamples(self) -> List[Dict[str, Any]]:
+        return self._formal.counterexamples()
+
+    def fv_summary(self) -> Dict[str, Any]:
+        return self._formal.summary()
+
+    def fv_report(self) -> str:
+        return self._formal.report_text()
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
