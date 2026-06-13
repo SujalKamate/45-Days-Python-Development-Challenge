@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from copy import deepcopy as _deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -22,7 +23,7 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
-from rate_limiter import RateLimiter, ThrottledExecutor
+from file_manager import FileManage
 
 
 @dataclass
@@ -83,15 +84,18 @@ try:
 except ImportError:
     from contracts import DataProvider, DataProcessor, AppRunner  # type: ignore[import-untyped]
 
+from merkle_tree import MerkleTree, IncrementalStateReplicator
+
 
 @dataclass
 class BaseAppState:
-    history: List[str] = field(default_factory=list)
+    history: HistoryStore = field(default_factory=lambda: HistoryStore(1000))
     records: Dict[str, Any] = field(default_factory=dict)
     flags: Dict[str, bool] = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.utcnow)
     runs: int = 0
     errors: int = 0
+    max_history: int = 1000
     perf_metrics: Dict[str, List[float]] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _next_id: int = 0
@@ -119,7 +123,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._rate_limiter = RateLimiter(default_rate=10.0, default_capacity=20)
+        self._replicator = IncrementalStateReplicator()
+        self._guard = ResourceGuard('BaseApp', self.output_dir
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -127,8 +132,6 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         stamp = datetime.now().strftime('%H:%M:%S')
         entry = f'[{stamp}] {message}'
         self.state.history.append(entry)
-        if len(self.state.history) > self.state.max_history:
-            del self.state.history[:len(self.state.history) - self.state.max_history]
         print(entry)
 
     def rotate_logs(self, keep: int = 50) -> None:
@@ -225,7 +228,35 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             return ''
 
     def record(self, key: str, value: Any) -> None:
-        self.state.records[key] = copy.deepcopy(value)
+        old_value = self.state.records.get(key)
+        with self.state._lock:
+            self._wal.log_update('main', key, old_value, value)
+            self.state.records[key] = _deepcopy(value)
+
+    def parallel_map(self, fn, items: List[Any]) -> List[Any]:
+        return self._executor.execute_batch(items, fn)
+
+    def parallel_run(self, fns: List) -> List[Any]:
+        return self._executor.run_in_parallel(fns)
+
+    def parallel_execute(self, fn) -> int:
+        return self._executor.execute(fn)
+
+    def shutdown_executor(self) -> None:
+        self._executor.shutdown()
+
+    def concurrent_gather(self, fns: List) -> List[Any]:
+        return self._concurrent.gather(fns)
+
+    def concurrent_run(self, fn, name: str = '') -> Any:
+        task = self._concurrent.run(fn, name)
+        return task.wait()
+
+    def cancel_concurrent(self) -> None:
+        self._concurrent.cancel_all()
+
+    def close_concurrent(self) -> None:
+        self._concurrent.close()
 
     def rate_acquire(self, key: str = 'default') -> None:
         self._rate_limiter.acquire(key)
@@ -269,14 +300,37 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         }
 
     def history_tail(self, count: int = 5) -> List[str]:
-        return self.state.history[-count:]
+        return self.state.history.tail(count)
+
+    def history_frequencies(self) -> Dict[str, int]:
+        return self.state.history._cache.frequencies()
+
+    def history_resize(self, new_max: int) -> int:
+        return self.state.history._cache.resize(new_max)
 
     @staticmethod
     def _compute_checksum(data: Dict[str, Any]) -> str:
         canonical = json.dumps(data, sort_keys=True, default=str)
         return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
 
+    @staticmethod
+    def _describe_value(value: Any) -> str:
+        if isinstance(value, (str, bytes)):
+            v = str(value)
+            return repr(v[:50]) + ('...' if len(v) > 50 else '')
+        if isinstance(value, (int, float, bool)):
+            return str(value)
+        if isinstance(value, (list, tuple)):
+            return f'{type(value).__name__}[{len(value)}]'
+        if isinstance(value, dict):
+            return f'dict[{len(value)}]'
+        if isinstance(value, set):
+            return f'set[{len(value)}]'
+        return type(value).__name__
+
     def export_state(self) -> Path:
+        records_snapshot = dict(self.state.records)
+        merkle_root = self._replicator.snapshot(records_snapshot)
         payload = {
             'version': 1,
             'exported_at': datetime.now(timezone.utc).isoformat(),
@@ -292,11 +346,48 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
                 'history_count': len(self.state.history),
             },
             'metadata': {
-                'records_summary': {k: self._describe_value(v) for k, v in list(self.state.records.items())[:20]},
+                'records_snapshot': records_snapshot,
                 'flags': dict(self.state.flags),
             },
+            'merkle_root': merkle_root,
         }
         return self.save_json('state.json', payload)
+
+    def verify_state(self, path: Optional[Path] = None) -> bool:
+        path = path or self.output_dir / self._guard.qualify('state.json')
+        data = self.load_json(path)
+        stored_root = data.get('merkle_root', '')
+        if not stored_root:
+            return True
+        metadata = data.get('metadata', {})
+        records_snapshot = metadata.get('records_snapshot', {})
+        return self._replicator.verify_state(records_snapshot, stored_root)
+
+    def export_delta(self, name: str = 'state_delta.json') -> Path:
+        records_export = dict(self.state.records)
+        new_root, delta = self._replicator.compute_delta(records_export)
+        if not delta:
+            return self.save_json(name, {'merkle_root': new_root, 'delta': {}})
+        payload = {
+            'merkle_root': new_root,
+            'delta': delta,
+            'exported_at': datetime.now(timezone.utc).isoformat(),
+        }
+        return self.save_json(name, payload)
+
+    def import_delta(self, path: Path) -> bool:
+        data = self.load_json(path)
+        if not data:
+            return False
+        delta = data.get('delta', {})
+        expected_root = data.get('merkle_root', '')
+        base_data = dict(self.state.records)
+        try:
+            merged = self._replicator.apply_delta(base_data, delta, expected_root)
+            self.state.records = merged
+            return True
+        except ValueError:
+            return False
 
     def _report_data(self) -> Dict[str, Any]:
         return {
@@ -306,8 +397,6 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             'flags': len(self.state.flags),
             'history_entries': len(self.state.history),
         }
-        payload['_checksum'] = self._compute_checksum(payload)
-        return self.save_json('state.json', payload)
 
     @contextmanager
     def _time_it(self, label: str) -> Generator[None, None, None]:
@@ -326,6 +415,13 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             avg = sum(timings) / len(timings)
             total = sum(timings)
             print(self.format_kv(label, f'{avg*1000:.1f}ms avg ({total*1000:.1f}ms total, {len(timings)} call(s))'))
+
+    def format_report(self) -> str:
+        data = self._report_data()
+        lines = [f'Runs: {data["runs"]}', f'Errors: {data["errors"]}',
+                 f'Records: {data["records"]}', f'Flags: {data["flags"]}',
+                 f'History entries: {data["history_entries"]}']
+        return '\n'.join(lines)
 
     def display_report(self) -> None:
         print(self.format_report())
@@ -376,6 +472,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def run(self) -> None:
         self.state.runs += 1
+        self._wal.begin_txn('main')
         self.section('Processing')
         with self._time_it('dataset'):
             items = self.dataset()
@@ -389,4 +486,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
     def finalize(self) -> None:
         with self._time_it('export_state'):
             self.export_state()
+        with self.state._lock:
+            self._wal.write_checkpoint(dict(self.state.records))
+        self._wal.commit_txn('main')
         self.log('Finalized successfully')
