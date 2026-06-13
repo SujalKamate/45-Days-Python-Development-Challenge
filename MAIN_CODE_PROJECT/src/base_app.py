@@ -23,11 +23,7 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 
-<<<<<<< fix/structured-concurrency
-from nursery import Nursery, StructuredExecutor, run_in_nursery
-=======
-from file_manager import FileManager
->>>>>>> main
+from file_manager import FileManage
 
 
 @dataclass
@@ -127,12 +123,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-<<<<<<< fix/structured-concurrency
-        self._concurrent = StructuredExecutor()
-=======
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir)
->>>>>>> main
+        self._guard = ResourceGuard('BaseApp', self.output_dir
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
