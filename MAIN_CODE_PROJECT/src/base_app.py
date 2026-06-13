@@ -24,6 +24,8 @@ from decimal_utils import Money, safe_decimal
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
 
+from degradation import GracefulDegradationEngine
+
 
 @dataclass
 class DataPoint:
@@ -123,7 +125,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
+        self._degradation = GracefulDegradationEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +623,45 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    def dg_register(self, name: str, criticality: str = 'non_critical',
+                    primary: Optional[Callable[..., Any]] = None,
+                    fallbacks: Optional[List[Callable[..., Any]]] = None,
+                    default_value: Any = None) -> None:
+        self._degradation.register_dependency(name, criticality, primary, fallbacks, default_value)
+
+    def dg_resolve(self, name: str, module: str = '',
+                   *args: Any, **kwargs: Any) -> Any:
+        return self._degradation.resolve(name, module, *args, **kwargs)
+
+    def dg_mark_degraded(self, module: str, dependency: str,
+                         severity: str = 'warning', message: str = '',
+                         root_cause: str = '') -> Any:
+        return self._degradation.mark_degraded(module, dependency, severity, message, root_cause)
+
+    def dg_mark_recovered(self, module: str, message: str = '') -> Any:
+        return self._degradation.mark_recovered(module, message)
+
+    def dg_is_degraded(self, module: str) -> bool:
+        return self._degradation.is_degraded(module)
+
+    def dg_skip_non_essential(self, skip: bool) -> None:
+        self._degradation.set_skip_non_essential(skip)
+
+    def dg_should_skip(self) -> bool:
+        return self._degradation.should_skip()
+
+    def dg_start_endpoint(self, host: str = '0.0.0.0', port: int = 8902) -> None:
+        self._degradation.start_monitoring_endpoint(host, port)
+
+    def dg_stop_endpoint(self) -> None:
+        self._degradation.stop_monitoring_endpoint()
+
+    def dg_summary(self) -> Dict[str, Any]:
+        return self._degradation.summary()
+
+    def dg_report(self) -> str:
+        return self._degradation.report_text()
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
