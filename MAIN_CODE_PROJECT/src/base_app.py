@@ -23,6 +23,7 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
+from hyperloglog import HyperLogLogEngine, HyperLogLogPlusPlus
 
 
 @dataclass
@@ -122,8 +123,9 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._hll_engine = HyperLogLogEngine()
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +622,47 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    # ── HyperLogLog++ cardinality estimation ──────────────────────────
+
+    def hll_create(self, name: str = 'default', p: int = 14) -> HyperLogLogPlusPlus:
+        return self._hll_engine.create(name, p)
+
+    def hll_add(self, item: Hashable, name: str = 'default') -> None:
+        self._hll_engine.add(item, name)
+
+    def hll_add_batch(self, items: List[Hashable], name: str = 'default') -> None:
+        self._hll_engine.add_batch(items, name)
+
+    def hll_estimate(self, name: str = 'default') -> float:
+        return self._hll_engine.estimate(name)
+
+    def hll_merge(self, dst: str, src: str) -> bool:
+        return self._hll_engine.merge(dst, src)
+
+    def hll_register_count(self, name: str = 'default') -> int:
+        return self._hll_engine.register_count(name)
+
+    def hll_clear(self, name: str = 'default') -> None:
+        self._hll_engine.clear(name)
+
+    def hll_clear_all(self) -> None:
+        self._hll_engine.clear_all()
+
+    def hll_snapshot(self, name: str = 'default') -> int:
+        return self._hll_engine.snapshot(name)
+
+    def hll_history(self, n: int = 10) -> List[Dict[str, Any]]:
+        return self._hll_engine.history(n)
+
+    def hll_summary(self) -> Dict[str, Any]:
+        return self._hll_engine.summary()
+
+    def hll_list(self) -> List[str]:
+        return self._hll_engine.list()
+
+    def hll_remove(self, name: str) -> bool:
+        return self._hll_engine.remove(name)
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
