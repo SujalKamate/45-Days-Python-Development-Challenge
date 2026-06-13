@@ -24,6 +24,8 @@ from decimal_utils import Money, safe_decimal
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
 
+from genetic_optimizer import GeneticOptimizationEngine
+
 
 @dataclass
 class DataPoint:
@@ -123,7 +125,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
+        self._genetic = GeneticOptimizationEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +623,28 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    def ga_optimize(self, gene_defs: List[Dict[str, Any]],
+                    fitness_fn: Callable[[Dict[str, Any]], float],
+                    pop_size: int = 20, generations: int = 10,
+                    mutation_rate: float = 0.1,
+                    label: str = '') -> Any:
+        return self._genetic.optimize(
+            gene_defs, fitness_fn, pop_size, generations,
+            mutation_rate, label=label,
+        )
+
+    def ga_history(self) -> List[Dict[str, Any]]:
+        return self._genetic.run_history()
+
+    def ga_last(self) -> Optional[Dict[str, Any]]:
+        return self._genetic.last_result()
+
+    def ga_summary(self) -> Dict[str, Any]:
+        return self._genetic.summary()
+
+    def ga_report(self) -> str:
+        return self._genetic.report_text()
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
