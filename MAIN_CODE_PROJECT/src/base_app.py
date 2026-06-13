@@ -344,6 +344,19 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         store = CheckpointStore(self.output_dir / '.checkpoints')
         store.clear_run(run_id)
 
+    def batch_process(self, items: List[Any], processor_fn) -> List[Any]:
+        adapter = AdaptiveBatchProcessor(processor_fn)
+        return adapter.process(items)
+
+    def batch_current_size(self) -> int:
+        return self._adaptive_batcher.current
+
+    def batch_update(self, batch_size: int, elapsed: float) -> None:
+        self._adaptive_batcher.update(batch_size, elapsed)
+
+    def batch_resize(self, min_batch: int = 1, max_batch: int = 1024) -> None:
+        self._adaptive_batcher.resize(min_batch, max_batch)
+
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
         self.state.flags[key] = not current
