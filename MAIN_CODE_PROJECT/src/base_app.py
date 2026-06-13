@@ -378,6 +378,15 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
     def prov_clear(self) -> None:
         self._provenance.clear()
 
+    def secret_split(self, label: str, secret: bytes) -> List[str]:
+        return self._key_manager.create(label, secret)
+
+    def secret_recover(self, label: str, share_indices: List[int]) -> bytes:
+        return self._key_manager.recover(label, share_indices)
+
+    def secret_rotate(self, label: str, share_indices: List[int]) -> List[str]:
+        return self._key_manager.rotate(label, share_indices)
+
     def toggle(self, key: str, default: bool = False) -> bool:
         current = self.state.flags.get(key, default)
         self.state.flags[key] = not current
