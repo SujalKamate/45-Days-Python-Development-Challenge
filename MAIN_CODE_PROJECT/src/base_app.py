@@ -24,6 +24,8 @@ from decimal_utils import Money, safe_decimal
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
 
+from retry_framework import RetryEngine, RetryPolicy, RetryableError, retry as retry_decorator
+
 
 @dataclass
 class DataPoint:
@@ -123,7 +125,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
+        self._retry = RetryEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +623,31 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    def rt_execute(self, fn: Callable[..., Any], *args: Any,
+                   max_attempts: int = 3, base_delay: float = 1.0,
+                   **kwargs: Any) -> Any:
+        policy = RetryPolicy(max_attempts=max_attempts, base_delay_s=base_delay)
+        return self._retry.execute(fn, *args, policy=policy, **kwargs)
+
+    def rt_execute_async(self, fn: Callable[..., Any], *args: Any,
+                         max_attempts: int = 3, base_delay: float = 1.0,
+                         **kwargs: Any) -> Any:
+        policy = RetryPolicy(max_attempts=max_attempts, base_delay_s=base_delay)
+        return self._retry.execute_async(fn, *args, policy=policy, **kwargs)
+
+    def rt_retry_context(self, max_attempts: int = 3,
+                         base_delay: float = 1.0) -> Any:
+        return self._retry.retry_context(RetryPolicy(max_attempts=max_attempts, base_delay_s=base_delay))
+
+    def rt_history(self, limit: int = 100) -> List[Dict[str, Any]]:
+        return self._retry.history(limit)
+
+    def rt_summary(self) -> Dict[str, Any]:
+        return self._retry.summary()
+
+    def rt_report(self) -> str:
+        return self._retry.report_text()
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
