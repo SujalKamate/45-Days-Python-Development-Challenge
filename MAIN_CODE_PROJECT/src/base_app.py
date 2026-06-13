@@ -134,6 +134,18 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.state.history.append(entry)
         print(entry)
 
+    def event_publish(self, event_type: str, message: str, data: Any = None) -> bool:
+        return self._event_bus.publish(event_type, type(self).__name__, message, data)
+
+    def event_subscribe(self, event_type: str, handler) -> None:
+        self._event_bus.subscribe(event_type, handler)
+
+    def event_dispatch(self) -> int:
+        return self._event_bus.dispatch()
+
+    def flush_events(self) -> None:
+        self._event_log.flush()
+
     def rotate_logs(self, keep: int = 50) -> None:
         from pathlib import Path
         logs = sorted(Path(self.output_dir).glob('*.json*'))
