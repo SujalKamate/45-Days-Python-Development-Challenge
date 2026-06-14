@@ -23,6 +23,7 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
+from simhash import SimhashEngine, Simhash, SimhashIndex
 
 
 @dataclass
@@ -122,8 +123,9 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._simhash = SimhashEngine()
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +622,40 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    # ── Simhash near-duplicate detection ─────────────────────────────
+
+    def sh_fingerprint(self, text: str, weights: Optional[Dict[str, float]] = None) -> Simhash:
+        return self._simhash.fingerprint(text, weights)
+
+    def sh_hamming_distance(self, a: Simhash, b: Simhash) -> int:
+        return self._simhash.hamming_distance(a, b)
+
+    def sh_similarity(self, a: Simhash, b: Simhash) -> float:
+        return self._simhash.similarity(a, b)
+
+    def sh_create_index(self, name: str = 'default', blocks: int = 4) -> SimhashIndex:
+        return self._simhash.create_index(name, blocks)
+
+    def sh_insert(self, key: str, text: str, index_name: str = 'default',
+                  weights: Optional[Dict[str, float]] = None) -> Simhash:
+        return self._simhash.insert(key, text, index_name, weights)
+
+    def sh_candidates(self, text: str, index_name: str = 'default',
+                      weights: Optional[Dict[str, float]] = None) -> List[str]:
+        return self._simhash.candidates(text, index_name, weights)
+
+    def sh_query(self, text: str, threshold: float = 0.85,
+                 index_name: str = 'default',
+                 weights: Optional[Dict[str, float]] = None) -> List[Tuple[str, float]]:
+        return self._simhash.query(text, threshold, index_name, weights)
+
+    def sh_find_duplicates(self, index_name: str = 'default',
+                           threshold: float = 0.85) -> List[Tuple[str, str, float]]:
+        return self._simhash.find_duplicates(index_name, threshold)
+
+    def sh_summary(self) -> Dict[str, Any]:
+        return self._simhash.summary()
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
