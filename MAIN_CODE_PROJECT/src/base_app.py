@@ -23,6 +23,7 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
+from van_emde_boas_tree import VEBTreeEngine, VEBTree
 
 
 @dataclass
@@ -122,8 +123,9 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._veb_tree = VEBTreeEngine()
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +622,44 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    # ── Van Emde Boas integer tree ──────────────────────────────────
+
+    def veb_create(self, name: str = 'default', universe_size: int = 65536) -> VEBTree:
+        return self._veb_tree.create(name, universe_size)
+
+    def veb_insert(self, key: int, name: str = 'default') -> None:
+        self._veb_tree.insert(key, name)
+
+    def veb_delete(self, key: int, name: str = 'default') -> bool:
+        return self._veb_tree.delete(key, name)
+
+    def veb_successor(self, key: int, name: str = 'default') -> Optional[int]:
+        return self._veb_tree.successor(key, name)
+
+    def veb_predecessor(self, key: int, name: str = 'default') -> Optional[int]:
+        return self._veb_tree.predecessor(key, name)
+
+    def veb_min(self, name: str = 'default') -> Optional[int]:
+        return self._veb_tree.min_key(name)
+
+    def veb_max(self, name: str = 'default') -> Optional[int]:
+        return self._veb_tree.max_key(name)
+
+    def veb_contains(self, key: int, name: str = 'default') -> bool:
+        return self._veb_tree.contains(key, name)
+
+    def veb_metrics(self, name: str = 'default') -> Dict[str, Any]:
+        return self._veb_tree.metrics(name)
+
+    def veb_summary(self) -> Dict[str, Any]:
+        return self._veb_tree.summary()
+
+    def veb_list(self) -> List[str]:
+        return self._veb_tree.list()
+
+    def veb_remove(self, name: str) -> bool:
+        return self._veb_tree.remove(name)
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
