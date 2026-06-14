@@ -24,7 +24,7 @@ from decimal_utils import Money, safe_decimal
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
 
-from dist_tracing import DistributedTracer
+from reliable_msg import ReliableMessagingBroker, PersistentMessagingClient
 
 
 @dataclass
@@ -124,7 +124,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._tracer = DistributedTracer('BaseApp', sampling_rate=1.0)
+        self._msg_broker = ReliableMessagingBroker()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -614,7 +614,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.report_metrics()
 
     def finalize(self) -> None:
-        self._crdt.stop_periodic_sync()
+        self._msg_broker.stop_redelivery_engine()
         with self._time_it('export_state'):
             self.export_state()
         with self.state._lock:
@@ -622,29 +622,32 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def trace_start_span(self, name: str, kind: str = 'INTERNAL', attributes: Optional[Dict[str, Any]] = None) -> Any:
-        return self._tracer.start_span(name, kind, attributes)
+    def msg_create_topic(self, topic: str, partitions: int = 1) -> None:
+        self._msg_broker.create_topic(topic, partitions)
 
-    def trace_end_span(self, span: Any, status: str = 'OK') -> None:
-        self._tracer.end_span(span, status)
+    def msg_publish(self, topic: str, payload: Any, key: str = '', headers: Optional[Dict[str, str]] = None) -> Any:
+        return self._msg_broker.publish(topic, payload, key, headers)
 
-    def trace_context(self, name: str, kind: str = 'INTERNAL', attributes: Optional[Dict[str, Any]] = None) -> Any:
-        return self._tracer.trace(name, kind, attributes)
+    def msg_subscribe(self, topic: str, callback: Callable[..., Any]) -> None:
+        self._msg_broker.subscribe(topic, callback)
 
-    def trace_inject(self, headers: Dict[str, str], span: Optional[Any] = None) -> Dict[str, str]:
-        return self._tracer.inject(headers, span)
+    def msg_ack(self, msg_id: str) -> bool:
+        return self._msg_broker.ack(msg_id)
 
-    def trace_extract(self, headers: Dict[str, str]) -> Optional[Any]:
-        return self._tracer.extract(headers)
+    def msg_create_consumer(self, client_id: str = '') -> PersistentMessagingClient:
+        return PersistentMessagingClient(self._msg_broker, client_id)
 
-    def trace_set_sampling(self, rate: float) -> None:
-        self._tracer.set_sampling_rate(rate)
+    def msg_join_group(self, client: PersistentMessagingClient, group_id: str) -> Any:
+        return client.join_group(group_id)
 
-    def trace_export(self, path: str) -> None:
-        self._tracer.export(path)
+    def msg_consume(self, client: PersistentMessagingClient, topic: str, batch_size: int = 10) -> List[Any]:
+        return client.consume_and_ack(topic, batch_size)
 
-    def trace_summary(self) -> Dict[str, Any]:
-        return self._tracer.summary()
+    def msg_start_redelivery(self, interval_s: float = 5.0) -> None:
+        self._msg_broker.start_redelivery_engine(interval_s)
 
-    def trace_export_artifacts(self, dir: str) -> List[str]:
-        return self._tracer.export_artifacts(dir)
+    def msg_summary(self) -> Dict[str, Any]:
+        return self._msg_broker.summary()
+
+    def msg_export_artifacts(self, dir: str) -> List[str]:
+        return self._msg_broker.export_artifacts(dir)
