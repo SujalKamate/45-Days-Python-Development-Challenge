@@ -23,6 +23,7 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
+from t_digest import TDigestEngine, TDigest
 
 
 @dataclass
@@ -122,8 +123,9 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._t_digest = TDigestEngine()
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +622,53 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    # ── T-Digest streaming quantile estimation ────────────────────────
+
+    def td_create(self, name: str = 'default', compression: float = 100.0) -> TDigest:
+        return self._t_digest.create(name, compression)
+
+    def td_add(self, value: float, weight: float = 1.0, name: str = 'default') -> None:
+        self._t_digest.add(value, weight, name)
+
+    def td_add_batch(self, values: List[float], name: str = 'default') -> None:
+        self._t_digest.add_batch(values, name)
+
+    def td_percentile(self, p: float, name: str = 'default') -> float:
+        return self._t_digest.percentile(p, name)
+
+    def td_cdf(self, value: float, name: str = 'default') -> float:
+        return self._t_digest.cdf(value, name)
+
+    def td_merge(self, dst: str, src: str) -> bool:
+        return self._t_digest.merge(dst, src)
+
+    def td_count(self, name: str = 'default') -> int:
+        return self._t_digest.count(name)
+
+    def td_centroids(self, name: str = 'default') -> int:
+        return self._t_digest.centroids_count(name)
+
+    def td_clear(self, name: str = 'default') -> None:
+        self._t_digest.clear(name)
+
+    def td_clear_all(self) -> None:
+        self._t_digest.clear_all()
+
+    def td_snapshot(self, name: str = 'default') -> int:
+        return self._t_digest.snapshot(name)
+
+    def td_history(self, n: int = 10) -> List[Dict[str, Any]]:
+        return self._t_digest.history(n)
+
+    def td_summary(self) -> Dict[str, Any]:
+        return self._t_digest.summary()
+
+    def td_list(self) -> List[str]:
+        return self._t_digest.list()
+
+    def td_remove(self, name: str) -> bool:
+        return self._t_digest.remove(name)
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
