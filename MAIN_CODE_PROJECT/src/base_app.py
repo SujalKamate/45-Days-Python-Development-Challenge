@@ -24,7 +24,7 @@ from decimal_utils import Money, safe_decimal
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
 
-from crdt_sync import CRDTClusterSync, LWWMap, PNCounter, TwoPhaseSet
+from dist_tracing import DistributedTracer
 
 
 @dataclass
@@ -124,7 +124,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._crdt = CRDTClusterSync('baseapp')
+        self._tracer = DistributedTracer('BaseApp', sampling_rate=1.0)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -622,41 +622,29 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def crdt_create_lww_map(self, key: str = 'state') -> LWWMap:
-        return self._crdt.create_lww_map(key)
+    def trace_start_span(self, name: str, kind: str = 'INTERNAL', attributes: Optional[Dict[str, Any]] = None) -> Any:
+        return self._tracer.start_span(name, kind, attributes)
 
-    def crdt_create_pn_counter(self, key: str = 'counter') -> PNCounter:
-        return self._crdt.create_pn_counter(key)
+    def trace_end_span(self, span: Any, status: str = 'OK') -> None:
+        self._tracer.end_span(span, status)
 
-    def crdt_create_set(self, key: str = 'set') -> TwoPhaseSet:
-        return self._crdt.create_two_phase_set(key)
+    def trace_context(self, name: str, kind: str = 'INTERNAL', attributes: Optional[Dict[str, Any]] = None) -> Any:
+        return self._tracer.trace(name, kind, attributes)
 
-    def crdt_set_value(self, crdt: Any, key: str, value: Any) -> None:
-        if isinstance(crdt, LWWMap):
-            crdt.set(key, value)
-        elif isinstance(crdt, PNCounter):
-            if value >= 0:
-                crdt.increment(amount=value)
-            else:
-                crdt.decrement(amount=-value)
-        elif isinstance(crdt, TwoPhaseSet):
-            crdt.add(value)
+    def trace_inject(self, headers: Dict[str, str], span: Optional[Any] = None) -> Dict[str, str]:
+        return self._tracer.inject(headers, span)
 
-    def crdt_get_value(self, crdt: Any, key: Optional[str] = None) -> Any:
-        if isinstance(crdt, LWWMap):
-            return crdt.get(key) if key else crdt.all_data
-        if isinstance(crdt, (PNCounter, TwoPhaseSet)):
-            return crdt.value if hasattr(crdt, 'value') else crdt.elements
-        return None
+    def trace_extract(self, headers: Dict[str, str]) -> Optional[Any]:
+        return self._tracer.extract(headers)
 
-    def crdt_merge_all(self) -> Dict[str, List[str]]:
-        return self._crdt.merge_all()
+    def trace_set_sampling(self, rate: float) -> None:
+        self._tracer.set_sampling_rate(rate)
 
-    def crdt_start_sync(self, interval_s: float = 5.0) -> None:
-        self._crdt.start_periodic_sync(interval_s)
+    def trace_export(self, path: str) -> None:
+        self._tracer.export(path)
 
-    def crdt_stop_sync(self) -> None:
-        self._crdt.stop_periodic_sync()
+    def trace_summary(self) -> Dict[str, Any]:
+        return self._tracer.summary()
 
-    def crdt_export_artifacts(self, dir: str) -> List[str]:
-        return self._crdt.export_artifacts(dir)
+    def trace_export_artifacts(self, dir: str) -> List[str]:
+        return self._tracer.export_artifacts(dir)
