@@ -23,6 +23,7 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
+from b_link_tree import BLinkTreeEngine, BLinkTree
 
 
 @dataclass
@@ -122,8 +123,9 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._b_link_tree = BLinkTreeEngine()
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +622,36 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    # ── B-Link tree concurrent indexing ─────────────────────────────
+
+    def bl_create(self, name: str = 'default', max_keys: int = 4) -> BLinkTree:
+        return self._b_link_tree.create(name, max_keys)
+
+    def bl_point_query(self, key: str, name: str = 'default') -> Any:
+        return self._b_link_tree.point_query(key, name)
+
+    def bl_insert(self, key: str, value: Any, name: str = 'default') -> None:
+        self._b_link_tree.insert(key, value, name)
+
+    def bl_delete(self, key: str, name: str = 'default') -> bool:
+        return self._b_link_tree.delete(key, name)
+
+    def bl_range_query(self, start: str, end: str,
+                       name: str = 'default') -> List[Tuple[str, Any]]:
+        return self._b_link_tree.range_query(start, end, name)
+
+    def bl_metrics(self, name: str = 'default') -> Dict[str, Any]:
+        return self._b_link_tree.metrics(name)
+
+    def bl_summary(self) -> Dict[str, Any]:
+        return self._b_link_tree.summary()
+
+    def bl_list(self) -> List[str]:
+        return self._b_link_tree.list()
+
+    def bl_remove(self, name: str) -> bool:
+        return self._b_link_tree.remove(name)
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
