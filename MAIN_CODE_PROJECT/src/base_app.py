@@ -23,6 +23,7 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
+from fusion_tree import FusionTreeEngine, FusionTree
 
 
 @dataclass
@@ -122,8 +123,9 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._fusion_tree = FusionTreeEngine()
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +622,44 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    # ── Fusion tree integer search ──────────────────────────────────
+
+    def ft_create(self, name: str = 'default', max_keys: int = 7) -> FusionTree:
+        return self._fusion_tree.create(name, max_keys)
+
+    def ft_insert(self, key: int, name: str = 'default') -> None:
+        self._fusion_tree.insert(key, name)
+
+    def ft_delete(self, key: int, name: str = 'default') -> bool:
+        return self._fusion_tree.delete(key, name)
+
+    def ft_predecessor(self, key: int, name: str = 'default') -> Optional[int]:
+        return self._fusion_tree.predecessor(key, name)
+
+    def ft_successor(self, key: int, name: str = 'default') -> Optional[int]:
+        return self._fusion_tree.successor(key, name)
+
+    def ft_contains(self, key: int, name: str = 'default') -> bool:
+        return self._fusion_tree.contains(key, name)
+
+    def ft_min(self, name: str = 'default') -> Optional[int]:
+        return self._fusion_tree.min_key(name)
+
+    def ft_max(self, name: str = 'default') -> Optional[int]:
+        return self._fusion_tree.max_key(name)
+
+    def ft_metrics(self, name: str = 'default') -> Dict[str, Any]:
+        return self._fusion_tree.metrics(name)
+
+    def ft_summary(self) -> Dict[str, Any]:
+        return self._fusion_tree.summary()
+
+    def ft_list(self) -> List[str]:
+        return self._fusion_tree.list()
+
+    def ft_remove(self, name: str) -> bool:
+        return self._fusion_tree.remove(name)
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
