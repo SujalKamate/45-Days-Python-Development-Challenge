@@ -5,7 +5,7 @@ from copy import deepcopy as _deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 import json
 import math
 import os
@@ -23,6 +23,7 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
+from stm_memory import STMEngine, STM, TVar, Transaction
 
 
 @dataclass
@@ -122,8 +123,9 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._stm_memory = STMEngine()
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +622,39 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    # ── Software transactional memory ──────────────────────────────
+
+    def stm_create(self, name: str = 'default', max_retries: int = 10) -> STM:
+        return self._stm_memory.create(name, max_retries)
+
+    def stm_TVar(self, value: Any, name: str = 'default') -> TVar:
+        return self._stm_memory.TVar(value, name)
+
+    def stm_transaction(self, block: Callable[[Transaction], Any],
+                        name: str = 'default') -> Any:
+        return self._stm_memory.transaction(block, name)
+
+    def stm_commit_count(self, name: str = 'default') -> int:
+        return self._stm_memory.commit_count(name)
+
+    def stm_abort_count(self, name: str = 'default') -> int:
+        return self._stm_memory.abort_count(name)
+
+    def stm_conflict_graph(self, name: str = 'default') -> Dict[str, Any]:
+        return self._stm_memory.conflict_graph_stats(name)
+
+    def stm_metrics(self, name: str = 'default') -> Dict[str, Any]:
+        return self._stm_memory.metrics(name)
+
+    def stm_summary(self) -> Dict[str, Any]:
+        return self._stm_memory.summary()
+
+    def stm_list(self) -> List[str]:
+        return self._stm_memory.list()
+
+    def stm_remove(self, name: str) -> bool:
+        return self._stm_memory.remove(name)
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
