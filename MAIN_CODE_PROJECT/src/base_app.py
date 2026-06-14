@@ -23,6 +23,7 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
+from skipnet_dht import SkipNetEngine, SkipNet
 
 
 @dataclass
@@ -122,8 +123,9 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._skipnet = SkipNetEngine()
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +622,39 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    # ── SkipNet DHT routing simulation ──────────────────────────────
+
+    def sn_create(self, name: str = 'default', max_levels: int = 16) -> SkipNet:
+        return self._skipnet.create(name, max_levels)
+
+    def sn_join(self, node_id: str, net_name: str = 'default') -> bool:
+        return self._skipnet.join(node_id, net_name)
+
+    def sn_leave(self, node_id: str, net_name: str = 'default') -> bool:
+        return self._skipnet.leave(node_id, net_name)
+
+    def sn_store(self, key: str, value: Any, node_id: Optional[str] = None,
+                 net_name: str = 'default') -> bool:
+        return self._skipnet.store(key, value, node_id, net_name)
+
+    def sn_lookup(self, key: str, net_name: str = 'default') -> Any:
+        return self._skipnet.lookup(key, net_name)
+
+    def sn_route_hops(self, key: str, net_name: str = 'default') -> Dict[str, Any]:
+        return self._skipnet.route_hops(key, net_name)
+
+    def sn_metrics(self, net_name: str = 'default') -> Dict[str, Any]:
+        return self._skipnet.metrics(net_name)
+
+    def sn_summary(self) -> Dict[str, Any]:
+        return self._skipnet.summary()
+
+    def sn_list(self) -> List[str]:
+        return self._skipnet.list()
+
+    def sn_remove(self, name: str) -> bool:
+        return self._skipnet.remove(name)
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
