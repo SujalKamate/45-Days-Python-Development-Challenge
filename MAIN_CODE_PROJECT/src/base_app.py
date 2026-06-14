@@ -23,6 +23,7 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
+from cuckoo_filter import CuckooFilterEngine, CuckooFilter
 
 
 @dataclass
@@ -122,8 +123,9 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._cuckoo_filter = CuckooFilterEngine()
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +622,44 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    # ── Cuckoo filter membership verification ───────────────────────
+
+    def cf_create(self, name: str = 'default', capacity: int = 100000,
+                  fingerprint_bits: int = 8, bucket_capacity: int = 4,
+                  max_relocations: int = 500) -> CuckooFilter:
+        return self._cuckoo_filter.create(name, capacity, fingerprint_bits,
+                                          bucket_capacity, max_relocations)
+
+    def cf_insert(self, item: Hashable, name: str = 'default') -> bool:
+        return self._cuckoo_filter.insert(item, name)
+
+    def cf_contains(self, item: Hashable, name: str = 'default') -> bool:
+        return self._cuckoo_filter.contains(item, name)
+
+    def cf_delete(self, item: Hashable, name: str = 'default') -> bool:
+        return self._cuckoo_filter.delete(item, name)
+
+    def cf_load_factor(self, name: str = 'default') -> float:
+        return self._cuckoo_filter.load_factor(name)
+
+    def cf_count(self, name: str = 'default') -> int:
+        return self._cuckoo_filter.count(name)
+
+    def cf_clear(self, name: str = 'default') -> None:
+        self._cuckoo_filter.clear(name)
+
+    def cf_clear_all(self) -> None:
+        self._cuckoo_filter.clear_all()
+
+    def cf_summary(self) -> Dict[str, Any]:
+        return self._cuckoo_filter.summary()
+
+    def cf_list(self) -> List[str]:
+        return self._cuckoo_filter.list()
+
+    def cf_remove(self, name: str) -> bool:
+        return self._cuckoo_filter.remove(name)
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
