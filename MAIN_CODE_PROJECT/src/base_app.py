@@ -24,6 +24,8 @@ from decimal_utils import Money, safe_decimal
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
 
+from dist_tracing import DistributedTracer
+
 
 @dataclass
 class DataPoint:
@@ -122,8 +124,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._tracer = DistributedTracer('BaseApp', sampling_rate=1.0)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -621,23 +622,29 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
-        self._pinner.pin_host(host, fingerprints)
+    def trace_start_span(self, name: str, kind: str = 'INTERNAL', attributes: Optional[Dict[str, Any]] = None) -> Any:
+        return self._tracer.start_span(name, kind, attributes)
 
-    def tls_unpin_host(self, host: str) -> None:
-        self._pinner.unpin_host(host)
+    def trace_end_span(self, span: Any, status: str = 'OK') -> None:
+        self._tracer.end_span(span, status)
 
-    def tls_rotate_pins(self, host: str, new_fingerprints: List[str], keep_old: bool = True) -> None:
-        self._pinner.rotate_host(host, new_fingerprints, keep_old)
+    def trace_context(self, name: str, kind: str = 'INTERNAL', attributes: Optional[Dict[str, Any]] = None) -> Any:
+        return self._tracer.trace(name, kind, attributes)
 
-    def tls_validate(self, host: str, port: int = 443) -> bool:
-        return self._pinner.validate(host, port)
+    def trace_inject(self, headers: Dict[str, str], span: Optional[Any] = None) -> Dict[str, str]:
+        return self._tracer.inject(headers, span)
 
-    def tls_request(self, url: str, method: str = 'GET', headers: Optional[Dict[str, str]] = None, data: Optional[bytes] = None, timeout: int = 30) -> Optional[bytes]:
-        return self._pinner.validated_request(url, method, headers, data, timeout)
+    def trace_extract(self, headers: Dict[str, str]) -> Optional[Any]:
+        return self._tracer.extract(headers)
 
-    def tls_audit_log(self, n: int = 10) -> List[Dict[str, str]]:
-        return self._pinner.audit_log(n)
+    def trace_set_sampling(self, rate: float) -> None:
+        self._tracer.set_sampling_rate(rate)
 
-    def tls_audit_clear(self) -> None:
-        self._pinner.audit_clear()
+    def trace_export(self, path: str) -> None:
+        self._tracer.export(path)
+
+    def trace_summary(self) -> Dict[str, Any]:
+        return self._tracer.summary()
+
+    def trace_export_artifacts(self, dir: str) -> List[str]:
+        return self._tracer.export_artifacts(dir)
