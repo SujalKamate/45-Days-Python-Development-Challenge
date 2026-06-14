@@ -23,6 +23,7 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
+from lsm_tree import LSMTreeEngine, LSMTree
 
 
 @dataclass
@@ -122,8 +123,9 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._lsm_tree = LSMTreeEngine()
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +622,43 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    # ── LSM-tree storage engine ─────────────────────────────────────
+
+    def lsm_create(self, name: str = 'default', base_dir: str = 'lsm_data',
+                   memtable_size: int = 10000, level_factor: int = 10) -> LSMTree:
+        return self._lsm_tree.create(name, base_dir, memtable_size, level_factor)
+
+    def lsm_put(self, key: str, value: Any, name: str = 'default') -> None:
+        self._lsm_tree.put(key, value, name)
+
+    def lsm_get(self, key: str, name: str = 'default') -> Any:
+        return self._lsm_tree.get_value(key, name)
+
+    def lsm_delete(self, key: str, name: str = 'default') -> None:
+        self._lsm_tree.delete(key, name)
+
+    def lsm_range_scan(self, start: str, end: str,
+                       name: str = 'default') -> List[Tuple[str, Any]]:
+        return self._lsm_tree.range_scan(start, end, name)
+
+    def lsm_bloom_path(self, key: str, name: str = 'default') -> Optional[str]:
+        return self._lsm_tree.bloom_filter_path(key, name)
+
+    def lsm_metrics(self, name: str = 'default') -> Dict[str, Any]:
+        return self._lsm_tree.metrics(name)
+
+    def lsm_close(self, name: str = 'default') -> None:
+        self._lsm_tree.close(name)
+
+    def lsm_summary(self) -> Dict[str, Any]:
+        return self._lsm_tree.summary()
+
+    def lsm_list(self) -> List[str]:
+        return self._lsm_tree.list()
+
+    def lsm_remove(self, name: str) -> bool:
+        return self._lsm_tree.remove(name)
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
