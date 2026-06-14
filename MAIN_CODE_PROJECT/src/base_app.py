@@ -23,6 +23,7 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
+from bitcask import BitcaskEngine, Bitcask
 
 
 @dataclass
@@ -122,8 +123,9 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._bitcask = BitcaskEngine()
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +622,42 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    # ── Bitcask append-only key-value storage ───────────────────────
+
+    def bc_create(self, name: str = 'default', base_dir: str = 'bitcask_data',
+                  max_active_size: int = 67108864) -> Bitcask:
+        return self._bitcask.create(name, base_dir, max_active_size)
+
+    def bc_put(self, key: str, value: Any, name: str = 'default') -> None:
+        self._bitcask.put(key, value, name)
+
+    def bc_get(self, key: str, name: str = 'default') -> Any:
+        return self._bitcask.get_value(key, name)
+
+    def bc_delete(self, key: str, name: str = 'default') -> bool:
+        return self._bitcask.delete(key, name)
+
+    def bc_merge(self, name: str = 'default') -> None:
+        self._bitcask.merge(name)
+
+    def bc_sync(self, name: str = 'default') -> None:
+        self._bitcask.sync(name)
+
+    def bc_metrics(self, name: str = 'default') -> Dict[str, Any]:
+        return self._bitcask.metrics(name)
+
+    def bc_close(self, name: str = 'default') -> None:
+        self._bitcask.close(name)
+
+    def bc_summary(self) -> Dict[str, Any]:
+        return self._bitcask.summary()
+
+    def bc_list(self) -> List[str]:
+        return self._bitcask.list()
+
+    def bc_remove(self, name: str) -> bool:
+        return self._bitcask.remove(name)
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
