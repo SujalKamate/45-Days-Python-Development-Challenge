@@ -5,7 +5,7 @@ from copy import deepcopy as _deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Optional, Set, Tuple
 import json
 import math
 import os
@@ -23,6 +23,7 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
+from minhash_lsh import MinHashLSHEngine, MinHashSignature, LSHIndex
 
 
 @dataclass
@@ -122,8 +123,9 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._minhash_lsh = MinHashLSHEngine()
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +622,44 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    # ── MinHash LSH similarity search ────────────────────────────────
+
+    def mh_create_generator(self, name: str = 'default', k: int = 128) -> Any:
+        return self._minhash_lsh.create_generator(name, k)
+
+    def mh_signature(self, items: Set[Hashable], gen_name: str = 'default') -> MinHashSignature:
+        return self._minhash_lsh.signature(items, gen_name)
+
+    def mh_similarity(self, sig1: MinHashSignature, sig2: MinHashSignature) -> float:
+        return self._minhash_lsh.similarity(sig1, sig2)
+
+    def mh_jaccard(self, set_a: Set[Hashable], set_b: Set[Hashable]) -> float:
+        return self._minhash_lsh.jaccard(set_a, set_b)
+
+    def mh_create_index(self, name: str, signature_len: int,
+                        bands: int, rows: int) -> LSHIndex:
+        return self._minhash_lsh.create_index(name, signature_len, bands, rows)
+
+    def mh_index_insert(self, index_name: str, key: str, sig: MinHashSignature) -> None:
+        self._minhash_lsh.index_insert(index_name, key, sig)
+
+    def mh_candidate_pairs(self, index_name: str,
+                           threshold: float = 0.5) -> List[Tuple[str, str, float]]:
+        return self._minhash_lsh.candidate_pairs(index_name, threshold)
+
+    def mh_query(self, index_name: str, sig: MinHashSignature,
+                 threshold: float = 0.5) -> List[Tuple[str, float]]:
+        return self._minhash_lsh.query(index_name, sig, threshold)
+
+    def mh_summary(self) -> Dict[str, Any]:
+        return self._minhash_lsh.summary()
+
+    def mh_list_generators(self) -> List[str]:
+        return self._minhash_lsh.list_generators()
+
+    def mh_list_indexes(self) -> List[str]:
+        return self._minhash_lsh.list_indexes()
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
