@@ -23,6 +23,7 @@ from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
+from quotient_filter import QuotientFilterEngine, QuotientFilter
 
 
 @dataclass
@@ -122,8 +123,9 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._quotient_filter = QuotientFilterEngine()
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -620,6 +622,53 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
             self._wal.write_checkpoint(dict(self.state.records))
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
+
+    # ── Quotient filter membership verification ──────────────────────
+
+    def qf_create(self, name: str = 'default', q: int = 14, r: int = 8) -> QuotientFilter:
+        return self._quotient_filter.create(name, q, r)
+
+    def qf_insert(self, item: Hashable, name: str = 'default') -> bool:
+        return self._quotient_filter.insert(item, name)
+
+    def qf_contains(self, item: Hashable, name: str = 'default') -> bool:
+        return self._quotient_filter.contains(item, name)
+
+    def qf_delete(self, item: Hashable, name: str = 'default') -> bool:
+        return self._quotient_filter.delete(item, name)
+
+    def qf_merge(self, dst: str, src: str) -> bool:
+        return self._quotient_filter.merge(dst, src)
+
+    def qf_intersection_estimate(self, name_a: str, name_b: str) -> Optional[float]:
+        return self._quotient_filter.intersection_estimate(name_a, name_b)
+
+    def qf_load_factor(self, name: str = 'default') -> float:
+        return self._quotient_filter.load_factor(name)
+
+    def qf_size_in_bytes(self, name: str = 'default') -> int:
+        return self._quotient_filter.size_in_bytes(name)
+
+    def qf_count(self, name: str = 'default') -> int:
+        return self._quotient_filter.count(name)
+
+    def qf_clear(self, name: str = 'default') -> None:
+        self._quotient_filter.clear(name)
+
+    def qf_clear_all(self) -> None:
+        self._quotient_filter.clear_all()
+
+    def qf_resize(self, new_q: int, name: str = 'default') -> None:
+        self._quotient_filter.resize(new_q, name)
+
+    def qf_summary(self) -> Dict[str, Any]:
+        return self._quotient_filter.summary()
+
+    def qf_list(self) -> List[str]:
+        return self._quotient_filter.list()
+
+    def qf_remove(self, name: str) -> bool:
+        return self._quotient_filter.remove(name)
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
