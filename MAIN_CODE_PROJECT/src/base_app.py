@@ -25,6 +25,8 @@ from drift_timer import DriftCorrectedTimer, Stopwatch
 
 from nat_traversal import NATTraversalManager
 
+from reliable_msg import ReliableMessagingBroker, PersistentMessagingClient
+
 
 @dataclass
 class DataPoint:
@@ -123,7 +125,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._nat_mgr = NATTraversalManager()
+        self._msg_broker = ReliableMessagingBroker()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -613,7 +615,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.report_metrics()
 
     def finalize(self) -> None:
-        self._nat_mgr.stop_listener()
+        self._msg_broker.stop_redelivery_engine()
         with self._time_it('export_state'):
             self.export_state()
         with self.state._lock:
@@ -621,24 +623,32 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def nat_discover_public(self) -> Optional[Tuple[str, int]]:
-        return self._nat_mgr.discover_public()
+    def msg_create_topic(self, topic: str, partitions: int = 1) -> None:
+        self._msg_broker.create_topic(topic, partitions)
 
-    def nat_gather_candidates(self, use_stun: bool = True, use_turn: bool = False,
-                               turn_config: Optional[Dict[str, Any]] = None) -> Any:
-        return self._nat_mgr.gather(use_stun, use_turn, turn_config)
+    def msg_publish(self, topic: str, payload: Any, key: str = '', headers: Optional[Dict[str, str]] = None) -> Any:
+        return self._msg_broker.publish(topic, payload, key, headers)
 
-    def nat_connect(self, peer_id: str, remote_candidates: List[Any], timeout: float = 5.0) -> bool:
-        return self._nat_mgr.connect_to_peer(peer_id, remote_candidates, timeout)
+    def msg_subscribe(self, topic: str, callback: Callable[..., Any]) -> None:
+        self._msg_broker.subscribe(topic, callback)
 
-    def nat_start_listener(self, port: int = 0) -> int:
-        return self._nat_mgr.start_listener(port)
+    def msg_ack(self, msg_id: str) -> bool:
+        return self._msg_broker.ack(msg_id)
 
-    def nat_stop_listener(self) -> None:
-        self._nat_mgr.stop_listener()
+    def msg_create_consumer(self, client_id: str = '') -> PersistentMessagingClient:
+        return PersistentMessagingClient(self._msg_broker, client_id)
 
-    def nat_summary(self) -> Dict[str, Any]:
-        return self._nat_mgr.candidate_summary()
+    def msg_join_group(self, client: PersistentMessagingClient, group_id: str) -> Any:
+        return client.join_group(group_id)
 
-    def nat_export_artifacts(self, dir: str) -> List[str]:
-        return self._nat_mgr.export_artifacts(dir)
+    def msg_consume(self, client: PersistentMessagingClient, topic: str, batch_size: int = 10) -> List[Any]:
+        return client.consume_and_ack(topic, batch_size)
+
+    def msg_start_redelivery(self, interval_s: float = 5.0) -> None:
+        self._msg_broker.start_redelivery_engine(interval_s)
+
+    def msg_summary(self) -> Dict[str, Any]:
+        return self._msg_broker.summary()
+
+    def msg_export_artifacts(self, dir: str) -> List[str]:
+        return self._msg_broker.export_artifacts(dir)
