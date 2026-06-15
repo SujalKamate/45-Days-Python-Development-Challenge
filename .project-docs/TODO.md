@@ -47,7 +47,7 @@ It is intentionally practical: better lessons, better scripts, better contributo
 
 ## 🧩 Documentation Improvements
 
-- [x] 🐍 Add Beginner Friendly Python Learning Roadmap Documentation (`.project-docs/PYTHON_LEARNING_ROADMAP.md`)
+- [x] 🏛️ Create Comprehensive Repository Architecture Overview Documentation (`.project-docs/ARCHITECTURE.md`)
 - [ ] 📦 Keep `.project-docs/INSTALL.md` aligned with repo structure
 - [ ] ❓ Expand `.project-docs/FAQ.md` as recurring questions show up
 - [ ] 🗺️ Keep `.project-docs/ROADMAP.md` updated as weeks/projects are added

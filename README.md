@@ -209,9 +209,9 @@ Welcome to the **45 Days Python Development Challenge** — a complete journey f
 
 👉 [45-Days-Python-Development-Challenge](https://github.com/abhisek2004/45-Days-Python-Development-Challenge?utm_source=chatgpt.com)
 
-## 🗺️ Python Learning Roadmap
+## 🏛️ Architecture Documentation
 
-👉 [Beginner-Friendly Python Learning Roadmap](.project-docs/PYTHON_LEARNING_ROADMAP.md)
+👉 [Comprehensive Repository Architecture Overview Documentation](.project-docs/ARCHITECTURE.md)
 
 ---
 
