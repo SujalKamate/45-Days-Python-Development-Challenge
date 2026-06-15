@@ -37,7 +37,7 @@ from webhook_delivery import WebhookDeliveryEngine
 
 from py_preprocessor import PreprocessorEngine
 
-from predictive_cache import PredictiveCacheEngine
+from bulkhead import BulkheadEngine
 
 
 @dataclass
@@ -139,7 +139,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._next_id: int = 0
         self._replicator = IncrementalStateReplicator()
         self._guard = ResourceGuard('BaseApp', self.output_dir)
-        self._pred_cache = PredictiveCacheEngine()
+        self._bulkhead = BulkheadEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -638,27 +638,30 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def pc_record(self, key: str, module: str = '', access_type: str = 'read') -> None:
-        self._pred_cache.record_access(key, module, access_type)
+    def bh_execute(self, group: str, fn: Callable[..., Any],
+                   *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute(group, fn, *args, **kwargs)
 
-    def pc_predict(self, loader: Callable[[str], Any], top_n: int = 10,
-                   context_key: Optional[str] = None) -> List[str]:
-        return self._pred_cache.predict_and_preload(loader, top_n, context_key)
+    def bh_io(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_io(fn, *args, **kwargs)
 
-    def pc_get(self, key: str, loader: Optional[Callable[[str], Any]] = None) -> Any:
-        return self._pred_cache.get(key, loader)
+    def bh_cpu(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_cpu(fn, *args, **kwargs)
 
-    def pc_record_cycle(self, keys: List[str], module: str = '') -> None:
-        self._pred_cache.record_cycle(keys, module)
+    def bh_network(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_network(fn, *args, **kwargs)
 
-    def pc_hit_rate(self) -> float:
-        return self._pred_cache.cache.hit_rate
+    def bh_create_group(self, name: str, max_conc: int = 10, queue: int = 20) -> Any:
+        return self._bulkhead.create_group(name, max_conc, queue)
 
-    def pc_summary(self) -> Dict[str, Any]:
-        return self._pred_cache.summary()
+    def bh_metrics(self, name: str) -> Optional[Dict[str, Any]]:
+        return self._bulkhead.group_metrics(name)
 
-    def pc_report(self) -> str:
-        return self._pred_cache.report_text()
+    def bh_summary(self) -> Dict[str, Any]:
+        return self._bulkhead.summary()
+
+    def bh_report(self) -> str:
+        return self._bulkhead.report_text()
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
