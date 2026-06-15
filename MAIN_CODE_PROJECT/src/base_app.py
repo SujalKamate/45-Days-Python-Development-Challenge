@@ -37,7 +37,7 @@ from webhook_delivery import WebhookDeliveryEngine
 
 from py_preprocessor import PreprocessorEngine
 
-from cli_generator import CLIGeneratorEngine
+from debug_repl import DebugREPLEngine
 
 
 @dataclass
@@ -137,7 +137,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._cli_gen = CLIGeneratorEngine('BaseApp')
+        self._debug = DebugREPLEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -636,31 +636,31 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def cli_register(self, name: str, fn: Callable[..., Any],
-                     description: str = '', aliases: Optional[List[str]] = None) -> Any:
-        return self._cli_gen.register_command(name, fn, description, aliases)
+    def dbg_register_module(self, name: str, module: Any) -> None:
+        self._debug.register_module(name, module)
 
-    def cli_register_self(self) -> int:
-        return self._cli_gen.register_from_instance(self, prefix='')
+    def dbg_register_callable(self, name: str, fn: Callable[..., Any]) -> None:
+        self._debug.register_callable(name, fn)
 
-    def cli_remove(self, name: str) -> bool:
-        return self._cli_gen.remove_command(name)
+    def dbg_trace(self, fn: Callable[..., Any], *args: Any,
+                  label: str = '', **kwargs: Any) -> Dict[str, Any]:
+        return self._debug.trace_execution(fn, *args, label=label, **kwargs)
 
-    def cli_list(self) -> List[str]:
-        return self._cli_gen.list_commands()
+    def dbg_trace_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._debug.trace_history(limit)
 
-    def cli_run(self, line: str) -> Dict[str, Any]:
-        return self._cli_gen.run_line(line)
+    def dbg_snapshot(self, key: str) -> None:
+        self._debug.snapshot_state(key, self._debug.inspector.state_snapshot(self))
 
-    def cli_repl(self) -> None:
-        self.cli_register_self()
-        self._cli_gen.run_interactive(banner='=== BaseApp CLI REPL ===')
+    def dbg_start_repl(self) -> None:
+        self._debug.register_module('base_app', self)
+        self._debug.register_callable('run', self.run)
+        self._debug.register_callable('dataset', self.dataset)
+        self._debug.register_callable('process_dataset', self.process_dataset)
+        self._debug.start_repl()
 
-    def cli_history(self, limit: int = 100) -> List[Dict[str, Any]]:
-        return self._cli_gen.history.entries(limit)
+    def dbg_summary(self) -> Dict[str, Any]:
+        return self._debug.summary()
 
-    def cli_summary(self) -> Dict[str, Any]:
-        return self._cli_gen.summary()
-
-    def cli_report(self) -> str:
-        return self._cli_gen.report_text()
+    def dbg_report(self) -> str:
+        return self._debug.report_text()
