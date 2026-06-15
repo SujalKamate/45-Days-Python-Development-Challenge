@@ -37,7 +37,7 @@ from webhook_delivery import WebhookDeliveryEngine
 
 from py_preprocessor import PreprocessorEngine
 
-from health_check import HealthCheckEngine
+from debug_repl import DebugREPLEngine
 
 
 @dataclass
@@ -137,9 +137,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir)
-        self._health = HealthCheckEngine()
+        self._debug = DebugREPLEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -638,61 +636,31 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def hc_liveness(self) -> Any:
-        return self._health.liveness()
+    def dbg_register_module(self, name: str, module: Any) -> None:
+        self._debug.register_module(name, module)
 
-    def hc_readiness(self) -> Any:
-        return self._health.readiness()
+    def dbg_register_callable(self, name: str, fn: Callable[..., Any]) -> None:
+        self._debug.register_callable(name, fn)
 
-    def hc_live_report(self) -> Dict[str, Any]:
-        return self._health.liveness().to_dict()
+    def dbg_trace(self, fn: Callable[..., Any], *args: Any,
+                  label: str = '', **kwargs: Any) -> Dict[str, Any]:
+        return self._debug.trace_execution(fn, *args, label=label, **kwargs)
 
-    def hc_ready_report(self) -> Dict[str, Any]:
-        return self._health.readiness().to_dict()
+    def dbg_trace_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._debug.trace_history(limit)
 
-    def hc_register_module(self, name: str) -> None:
-        self._health.module_checker.add_required(name)
+    def dbg_snapshot(self, key: str) -> None:
+        self._debug.snapshot_state(key, self._debug.inspector.state_snapshot(self))
 
-    def hc_record_execution(self, module_name: str) -> None:
-        self._health.record_execution(module_name)
+    def dbg_start_repl(self) -> None:
+        self._debug.register_module('base_app', self)
+        self._debug.register_callable('run', self.run)
+        self._debug.register_callable('dataset', self.dataset)
+        self._debug.register_callable('process_dataset', self.process_dataset)
+        self._debug.start_repl()
 
-    def hc_set_sample_fn(self, fn: Callable[[], Any]) -> None:
-        self._health.sample_checker.set_sample_fn(fn)
+    def dbg_summary(self) -> Dict[str, Any]:
+        return self._debug.summary()
 
-    def hc_add_dependency(self, name: str, host: str, port: int, timeout: float = 2.0) -> None:
-        self._health.dependency_checker.add_network_probe(name, host, port, timeout)
-
-    def hc_start_server(self, host: str = '0.0.0.0', port: int = 8901) -> None:
-        self._health.start_endpoint(host, port)
-
-    def hc_stop_server(self) -> None:
-        self._health.stop_endpoint()
-
-    def hc_summary(self) -> Dict[str, Any]:
-        return self._health.summary()
-
-    def hc_report(self) -> str:
-        return self._health.report_text()
-
-    def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
-        self._pinner.pin_host(host, fingerprints)
-
-    def gossip_stop(self) -> None:
-        if self._gossip:
-            self._gossip.stop()
-
-    def gossip_set_data(self, key: str, value: Any) -> None:
-        if self._gossip:
-            self._gossip.set_data(key, value)
-
-    def gossip_get_data(self, key: str) -> Optional[Any]:
-        return self._gossip.get_data(key) if self._gossip else None
-
-    def gossip_node_id(self) -> str:
-        return self._gossip.node_id if self._gossip else ''
-
-    def gossip_summary(self) -> Dict[str, Any]:
-        return self._gossip.summary() if self._gossip else {}
-
-    def gossip_export_artifacts(self, dir: str) -> List[str]:
-        return self._gossip.export_artifacts(dir) if self._gossip else []
+    def dbg_report(self) -> str:
+        return self._debug.report_text()
