@@ -22,7 +22,8 @@ from json_depth_guard import safe_json_loads
 from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
-from file_manager import FileManage
+
+from nat_traversal import NATTraversalManager
 
 from reliable_msg import ReliableMessagingBroker, PersistentMessagingClient
 
