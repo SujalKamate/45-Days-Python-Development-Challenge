@@ -22,7 +22,12 @@ from json_depth_guard import safe_json_loads
 from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
-from file_manager import FileManage
+
+from nat_traversal import NATTraversalManager
+
+from gossip_protocol import GossipNode
+
+from lua_sandbox import ScriptStore
 
 from openapi_spec import OpenAPIOrchestrator
 
@@ -124,7 +129,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._openapi = OpenAPIOrchestrator('BaseApp API', '1.0.0')
+        self._gossip: Optional[GossipNode] = None
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -614,7 +619,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.report_metrics()
 
     def finalize(self) -> None:
-        self._entropy.stop_monitoring()
+        if self._gossip:
+            self._gossip.stop()
         with self._time_it('export_state'):
             self.export_state()
         with self.state._lock:
@@ -622,24 +628,28 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def oapi_register_endpoint(self, path: str, method: str, fn: Callable[..., Any],
-                                summary: str = '', tags: Optional[List[str]] = None) -> None:
-        self._openapi.register_endpoint(path, method, fn, summary, tags)
+    def gossip_start(self, host: str = '0.0.0.0', port: int = 0,
+                     seed_hosts: Optional[List[Tuple[str, int]]] = None) -> GossipNode:
+        self._gossip = GossipNode(host, port, seed_hosts or [])
+        self._gossip.start()
+        return self._gossip
 
-    def oapi_register_schema(self, name: str, cls: type) -> str:
-        return self._openapi.register_schema(name, cls)
+    def gossip_stop(self) -> None:
+        if self._gossip:
+            self._gossip.stop()
 
-    def oapi_generate(self) -> Dict[str, Any]:
-        return self._openapi.generate_spec()
+    def gossip_set_data(self, key: str, value: Any) -> None:
+        if self._gossip:
+            self._gossip.set_data(key, value)
 
-    def oapi_export(self, path: str, fmt: str = 'json') -> None:
-        self._openapi.export_spec(path, fmt)
+    def gossip_get_data(self, key: str) -> Optional[Any]:
+        return self._gossip.get_data(key) if self._gossip else None
 
-    def oapi_serve_docs(self, host: str = '0.0.0.0', port: int = 8080) -> Any:
-        return self._openapi.serve_docs(host, port)
+    def gossip_node_id(self) -> str:
+        return self._gossip.node_id if self._gossip else ''
 
-    def oapi_stop_server(self) -> None:
-        self._openapi.stop_server()
+    def gossip_summary(self) -> Dict[str, Any]:
+        return self._gossip.summary() if self._gossip else {}
 
-    def oapi_export_artifacts(self, dir: str) -> List[str]:
-        return self._openapi.export_artifacts(dir)
+    def gossip_export_artifacts(self, dir: str) -> List[str]:
+        return self._gossip.export_artifacts(dir) if self._gossip else []
