@@ -5,7 +5,7 @@ from copy import deepcopy as _deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 import json
 import math
 import os
@@ -22,7 +22,20 @@ from json_depth_guard import safe_json_loads
 from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
-from file_manager import FileManage
+
+from nat_traversal import NATTraversalManager
+
+from gossip_protocol import GossipNode
+
+from lua_sandbox import ScriptStore
+
+from openapi_spec import OpenAPIOrchestrator
+
+from graphql_sub import GraphQLSubscriptionEngine
+
+from webhook_delivery import WebhookDeliveryEngine
+
+from py_preprocessor import PreprocessorEngine
 
 from degradation import GracefulDegradationEngine
 
@@ -616,7 +629,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.report_metrics()
 
     def finalize(self) -> None:
-        self._entropy.stop_monitoring()
+        if self._gossip:
+            self._gossip.stop()
         with self._time_it('export_state'):
             self.export_state()
         with self.state._lock:
@@ -666,20 +680,22 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
 
-    def tls_unpin_host(self, host: str) -> None:
-        self._pinner.unpin_host(host)
+    def gossip_stop(self) -> None:
+        if self._gossip:
+            self._gossip.stop()
 
-    def tls_rotate_pins(self, host: str, new_fingerprints: List[str], keep_old: bool = True) -> None:
-        self._pinner.rotate_host(host, new_fingerprints, keep_old)
+    def gossip_set_data(self, key: str, value: Any) -> None:
+        if self._gossip:
+            self._gossip.set_data(key, value)
 
-    def tls_validate(self, host: str, port: int = 443) -> bool:
-        return self._pinner.validate(host, port)
+    def gossip_get_data(self, key: str) -> Optional[Any]:
+        return self._gossip.get_data(key) if self._gossip else None
 
-    def tls_request(self, url: str, method: str = 'GET', headers: Optional[Dict[str, str]] = None, data: Optional[bytes] = None, timeout: int = 30) -> Optional[bytes]:
-        return self._pinner.validated_request(url, method, headers, data, timeout)
+    def gossip_node_id(self) -> str:
+        return self._gossip.node_id if self._gossip else ''
 
-    def tls_audit_log(self, n: int = 10) -> List[Dict[str, str]]:
-        return self._pinner.audit_log(n)
+    def gossip_summary(self) -> Dict[str, Any]:
+        return self._gossip.summary() if self._gossip else {}
 
-    def tls_audit_clear(self) -> None:
-        self._pinner.audit_clear()
+    def gossip_export_artifacts(self, dir: str) -> List[str]:
+        return self._gossip.export_artifacts(dir) if self._gossip else []
