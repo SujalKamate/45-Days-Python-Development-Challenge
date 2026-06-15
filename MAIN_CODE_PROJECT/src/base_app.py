@@ -22,7 +22,14 @@ from json_depth_guard import safe_json_loads
 from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
-from file_manager import FileManage
+
+from nat_traversal import NATTraversalManager
+
+from gossip_protocol import GossipNode
+
+from lua_sandbox import ScriptStore
+
+from openapi_spec import OpenAPIOrchestrator
 
 from graphql_sub import GraphQLSubscriptionEngine
 
@@ -124,7 +131,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._gql = GraphQLSubscriptionEngine()
+        self._gossip: Optional[GossipNode] = None
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -614,7 +621,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.report_metrics()
 
     def finalize(self) -> None:
-        self._entropy.stop_monitoring()
+        if self._gossip:
+            self._gossip.stop()
         with self._time_it('export_state'):
             self.export_state()
         with self.state._lock:
@@ -622,33 +630,28 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def gql_publish(self, topic: str, event_type: str, data: Any,
-                    module: str = '', metadata: Optional[Dict[str, Any]] = None) -> Any:
-        return self._gql.publish(topic, event_type, data, module, metadata)
+    def gossip_start(self, host: str = '0.0.0.0', port: int = 0,
+                     seed_hosts: Optional[List[Tuple[str, int]]] = None) -> GossipNode:
+        self._gossip = GossipNode(host, port, seed_hosts or [])
+        self._gossip.start()
+        return self._gossip
 
-    def gql_subscribe(self, topics: Optional[List[str]] = None,
-                      event_types: Optional[List[str]] = None,
-                      modules: Optional[List[str]] = None,
-                      callback: Optional[Callable] = None) -> str:
-        return self._gql.subscribe(topics, event_types, modules, callback)
+    def gossip_stop(self) -> None:
+        if self._gossip:
+            self._gossip.stop()
 
-    def gql_unsubscribe(self, sub_id: str) -> bool:
-        return self._gql.unsubscribe(sub_id)
+    def gossip_set_data(self, key: str, value: Any) -> None:
+        if self._gossip:
+            self._gossip.set_data(key, value)
 
-    def gql_poll(self, sub_id: str, timeout: float = 1.0) -> Any:
-        return self._gql.poll(sub_id, timeout)
+    def gossip_get_data(self, key: str) -> Optional[Any]:
+        return self._gossip.get_data(key) if self._gossip else None
 
-    def gql_poll_batch(self, sub_id: str, max_events: int = 10, timeout: float = 0.5) -> List[Any]:
-        return self._gql.poll_batch(sub_id, max_events, timeout)
+    def gossip_node_id(self) -> str:
+        return self._gossip.node_id if self._gossip else ''
 
-    def gql_start_sse_server(self, host: str = '0.0.0.0', port: int = 8900) -> Any:
-        return self._gql.start_sse_server(host, port)
+    def gossip_summary(self) -> Dict[str, Any]:
+        return self._gossip.summary() if self._gossip else {}
 
-    def gql_stop_server(self) -> None:
-        self._gql.stop_server()
-
-    def gql_summary(self) -> Dict[str, Any]:
-        return self._gql.summary()
-
-    def gql_report(self) -> str:
-        return self._gql.report_text()
+    def gossip_export_artifacts(self, dir: str) -> List[str]:
+        return self._gossip.export_artifacts(dir) if self._gossip else []
