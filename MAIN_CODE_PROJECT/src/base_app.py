@@ -25,7 +25,7 @@ from drift_timer import DriftCorrectedTimer, Stopwatch
 
 from nat_traversal import NATTraversalManager
 
-from reliable_msg import ReliableMessagingBroker, PersistentMessagingClient
+from gossip_protocol import GossipNode
 
 
 @dataclass
@@ -125,7 +125,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._msg_broker = ReliableMessagingBroker()
+        self._gossip: Optional[GossipNode] = None
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -615,7 +615,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.report_metrics()
 
     def finalize(self) -> None:
-        self._msg_broker.stop_redelivery_engine()
+        if self._gossip:
+            self._gossip.stop()
         with self._time_it('export_state'):
             self.export_state()
         with self.state._lock:
@@ -623,32 +624,28 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def msg_create_topic(self, topic: str, partitions: int = 1) -> None:
-        self._msg_broker.create_topic(topic, partitions)
+    def gossip_start(self, host: str = '0.0.0.0', port: int = 0,
+                     seed_hosts: Optional[List[Tuple[str, int]]] = None) -> GossipNode:
+        self._gossip = GossipNode(host, port, seed_hosts or [])
+        self._gossip.start()
+        return self._gossip
 
-    def msg_publish(self, topic: str, payload: Any, key: str = '', headers: Optional[Dict[str, str]] = None) -> Any:
-        return self._msg_broker.publish(topic, payload, key, headers)
+    def gossip_stop(self) -> None:
+        if self._gossip:
+            self._gossip.stop()
 
-    def msg_subscribe(self, topic: str, callback: Callable[..., Any]) -> None:
-        self._msg_broker.subscribe(topic, callback)
+    def gossip_set_data(self, key: str, value: Any) -> None:
+        if self._gossip:
+            self._gossip.set_data(key, value)
 
-    def msg_ack(self, msg_id: str) -> bool:
-        return self._msg_broker.ack(msg_id)
+    def gossip_get_data(self, key: str) -> Optional[Any]:
+        return self._gossip.get_data(key) if self._gossip else None
 
-    def msg_create_consumer(self, client_id: str = '') -> PersistentMessagingClient:
-        return PersistentMessagingClient(self._msg_broker, client_id)
+    def gossip_node_id(self) -> str:
+        return self._gossip.node_id if self._gossip else ''
 
-    def msg_join_group(self, client: PersistentMessagingClient, group_id: str) -> Any:
-        return client.join_group(group_id)
+    def gossip_summary(self) -> Dict[str, Any]:
+        return self._gossip.summary() if self._gossip else {}
 
-    def msg_consume(self, client: PersistentMessagingClient, topic: str, batch_size: int = 10) -> List[Any]:
-        return client.consume_and_ack(topic, batch_size)
-
-    def msg_start_redelivery(self, interval_s: float = 5.0) -> None:
-        self._msg_broker.start_redelivery_engine(interval_s)
-
-    def msg_summary(self) -> Dict[str, Any]:
-        return self._msg_broker.summary()
-
-    def msg_export_artifacts(self, dir: str) -> List[str]:
-        return self._msg_broker.export_artifacts(dir)
+    def gossip_export_artifacts(self, dir: str) -> List[str]:
+        return self._gossip.export_artifacts(dir) if self._gossip else []
