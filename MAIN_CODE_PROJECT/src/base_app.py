@@ -22,7 +22,16 @@ from json_depth_guard import safe_json_loads
 from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
-from file_manager import FileManage
+
+from nat_traversal import NATTraversalManager
+
+from gossip_protocol import GossipNode
+
+from lua_sandbox import ScriptStore
+
+from openapi_spec import OpenAPIOrchestrator
+
+from graphql_sub import GraphQLSubscriptionEngine
 
 from webhook_delivery import WebhookDeliveryEngine
 
@@ -124,7 +133,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._webhook = WebhookDeliveryEngine()
+        self._gossip: Optional[GossipNode] = None
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -614,7 +623,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.report_metrics()
 
     def finalize(self) -> None:
-        self._entropy.stop_monitoring()
+        if self._gossip:
+            self._gossip.stop()
         with self._time_it('export_state'):
             self.export_state()
         with self.state._lock:
@@ -622,31 +632,28 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def wh_register(self, url: str, secret: str = '',
-                    headers: Optional[Dict[str, str]] = None,
-                    max_retries: int = 5, timeout_s: float = 10.0,
-                    event_types: Optional[List[str]] = None,
-                    label: str = '') -> str:
-        return self._webhook.register_endpoint(url, secret, headers, max_retries, timeout_s, event_types, label)
+    def gossip_start(self, host: str = '0.0.0.0', port: int = 0,
+                     seed_hosts: Optional[List[Tuple[str, int]]] = None) -> GossipNode:
+        self._gossip = GossipNode(host, port, seed_hosts or [])
+        self._gossip.start()
+        return self._gossip
 
-    def wh_unregister(self, endpoint_id: str) -> bool:
-        return self._webhook.unregister_endpoint(endpoint_id)
+    def gossip_stop(self) -> None:
+        if self._gossip:
+            self._gossip.stop()
 
-    def wh_list(self) -> List[Dict[str, Any]]:
-        return self._webhook.list_endpoints()
+    def gossip_set_data(self, key: str, value: Any) -> None:
+        if self._gossip:
+            self._gossip.set_data(key, value)
 
-    def wh_deliver(self, event_type: str, data: Any,
-                   endpoint_id: Optional[str] = None) -> List[Any]:
-        return self._webhook.deliver(event_type, data, endpoint_id)
+    def gossip_get_data(self, key: str) -> Optional[Any]:
+        return self._gossip.get_data(key) if self._gossip else None
 
-    def wh_history(self, limit: int = 100) -> List[Dict[str, Any]]:
-        return self._webhook.delivery_history(limit)
+    def gossip_node_id(self) -> str:
+        return self._gossip.node_id if self._gossip else ''
 
-    def wh_stats(self) -> Dict[str, int]:
-        return self._webhook.delivery_stats()
+    def gossip_summary(self) -> Dict[str, Any]:
+        return self._gossip.summary() if self._gossip else {}
 
-    def wh_summary(self) -> Dict[str, Any]:
-        return self._webhook.summary()
-
-    def wh_report(self) -> str:
-        return self._webhook.report_text()
+    def gossip_export_artifacts(self, dir: str) -> List[str]:
+        return self._gossip.export_artifacts(dir) if self._gossip else []
