@@ -37,7 +37,7 @@ from webhook_delivery import WebhookDeliveryEngine
 
 from py_preprocessor import PreprocessorEngine
 
-from hot_reload import HotReloadEngine
+from debug_repl import DebugREPLEngine
 
 
 @dataclass
@@ -137,7 +137,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._hot_reload = HotReloadEngine()
+        self._debug = DebugREPLEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -636,40 +636,31 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def hr_watch(self, module_name: str, path: str) -> None:
-        self._hot_reload.watch_module(module_name, path)
+    def dbg_register_module(self, name: str, module: Any) -> None:
+        self._debug.register_module(name, module)
 
-    def hr_unwatch(self, module_name: str) -> None:
-        self._hot_reload.unwatch_module(module_name)
+    def dbg_register_callable(self, name: str, fn: Callable[..., Any]) -> None:
+        self._debug.register_callable(name, fn)
 
-    def hr_reload(self, module_name: str, migrate: bool = True) -> bool:
-        return self._hot_reload.reload_module(module_name, migrate)
+    def dbg_trace(self, fn: Callable[..., Any], *args: Any,
+                  label: str = '', **kwargs: Any) -> Dict[str, Any]:
+        return self._debug.trace_execution(fn, *args, label=label, **kwargs)
 
-    def hr_rollback(self, module_name: str, version: int) -> bool:
-        return self._hot_reload.rollback_module(module_name, version)
+    def dbg_trace_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._debug.trace_history(limit)
 
-    def hr_register_migration(self, from_v: int, to_v: int,
-                              fn: Callable[[Dict[str, Any]], Dict[str, Any]],
-                              desc: str = '') -> None:
-        self._hot_reload.register_migration(from_v, to_v, fn, desc)
+    def dbg_snapshot(self, key: str) -> None:
+        self._debug.snapshot_state(key, self._debug.inspector.state_snapshot(self))
 
-    def hr_set_version(self, module_name: str, version: int) -> None:
-        self._hot_reload.set_current_version(module_name, version)
+    def dbg_start_repl(self) -> None:
+        self._debug.register_module('base_app', self)
+        self._debug.register_callable('run', self.run)
+        self._debug.register_callable('dataset', self.dataset)
+        self._debug.register_callable('process_dataset', self.process_dataset)
+        self._debug.start_repl()
 
-    def hr_save_state(self, module_name: str, data: Dict[str, Any]) -> Any:
-        return self._hot_reload.save_state(module_name, data)
+    def dbg_summary(self) -> Dict[str, Any]:
+        return self._debug.summary()
 
-    def hr_start_auto(self) -> None:
-        self._hot_reload.start_auto_reload()
-
-    def hr_stop_auto(self) -> None:
-        self._hot_reload.stop_auto_reload()
-
-    def hr_detect(self) -> List[str]:
-        return self._hot_reload.detect_and_reload()
-
-    def hr_summary(self) -> Dict[str, Any]:
-        return self._hot_reload.state_summary()
-
-    def hr_report(self) -> str:
-        return self._hot_reload.report_text()
+    def dbg_report(self) -> str:
+        return self._debug.report_text()
