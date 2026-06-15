@@ -31,6 +31,8 @@ from lua_sandbox import ScriptStore
 
 from openapi_spec import OpenAPIOrchestrator
 
+from graphql_sub import GraphQLSubscriptionEngine
+
 
 @dataclass
 class DataPoint:
