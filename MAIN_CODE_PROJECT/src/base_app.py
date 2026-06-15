@@ -37,7 +37,11 @@ from webhook_delivery import WebhookDeliveryEngine
 
 from py_preprocessor import PreprocessorEngine
 
+<<<<<<< fix/algebraic-effects
 from algebraic_effects import AlgebraicEffectsEngine
+=======
+from bulkhead import BulkheadEngine
+>>>>>>> main
 
 
 @dataclass
@@ -139,7 +143,11 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._next_id: int = 0
         self._replicator = IncrementalStateReplicator()
         self._guard = ResourceGuard('BaseApp', self.output_dir)
+<<<<<<< fix/algebraic-effects
         self._effects = AlgebraicEffectsEngine()
+=======
+        self._bulkhead = BulkheadEngine()
+>>>>>>> main
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -638,6 +646,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
+<<<<<<< fix/algebraic-effects
     def ae_register(self, effect_type: str,
                     handler_fn: Optional[Callable[[Any], Any]] = None) -> None:
         self._effects.register_handler(effect_type, handler_fn)
@@ -666,23 +675,58 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
+=======
+    def bh_execute(self, group: str, fn: Callable[..., Any],
+                   *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute(group, fn, *args, **kwargs)
+>>>>>>> main
 
-    def gossip_stop(self) -> None:
-        if self._gossip:
-            self._gossip.stop()
+    def bh_io(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_io(fn, *args, **kwargs)
 
-    def gossip_set_data(self, key: str, value: Any) -> None:
-        if self._gossip:
-            self._gossip.set_data(key, value)
+    def bh_cpu(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_cpu(fn, *args, **kwargs)
 
-    def gossip_get_data(self, key: str) -> Optional[Any]:
-        return self._gossip.get_data(key) if self._gossip else None
+    def bh_network(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_network(fn, *args, **kwargs)
 
-    def gossip_node_id(self) -> str:
-        return self._gossip.node_id if self._gossip else ''
+    def bh_create_group(self, name: str, max_conc: int = 10, queue: int = 20) -> Any:
+        return self._bulkhead.create_group(name, max_conc, queue)
 
-    def gossip_summary(self) -> Dict[str, Any]:
-        return self._gossip.summary() if self._gossip else {}
+    def bh_metrics(self, name: str) -> Optional[Dict[str, Any]]:
+        return self._bulkhead.group_metrics(name)
 
-    def gossip_export_artifacts(self, dir: str) -> List[str]:
-        return self._gossip.export_artifacts(dir) if self._gossip else []
+    def bh_summary(self) -> Dict[str, Any]:
+        return self._bulkhead.summary()
+
+    def bh_report(self) -> str:
+        return self._bulkhead.report_text()
+
+    def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
+        self._pinner.pin_host(host, fingerprints)
+
+    def dbg_register_callable(self, name: str, fn: Callable[..., Any]) -> None:
+        self._debug.register_callable(name, fn)
+
+    def dbg_trace(self, fn: Callable[..., Any], *args: Any,
+                  label: str = '', **kwargs: Any) -> Dict[str, Any]:
+        return self._debug.trace_execution(fn, *args, label=label, **kwargs)
+
+    def dbg_trace_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._debug.trace_history(limit)
+
+    def dbg_snapshot(self, key: str) -> None:
+        self._debug.snapshot_state(key, self._debug.inspector.state_snapshot(self))
+
+    def dbg_start_repl(self) -> None:
+        self._debug.register_module('base_app', self)
+        self._debug.register_callable('run', self.run)
+        self._debug.register_callable('dataset', self.dataset)
+        self._debug.register_callable('process_dataset', self.process_dataset)
+        self._debug.start_repl()
+
+    def dbg_summary(self) -> Dict[str, Any]:
+        return self._debug.summary()
+
+    def dbg_report(self) -> str:
+        return self._debug.report_text()
