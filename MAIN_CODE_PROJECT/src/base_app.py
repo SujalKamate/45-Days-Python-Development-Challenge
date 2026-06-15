@@ -5,7 +5,7 @@ from copy import deepcopy as _deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from typing import Any, Dict, Generator, Hashable, List, Optional, Tuple
 import json
 import math
 import os
@@ -22,10 +22,22 @@ from json_depth_guard import safe_json_loads
 from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
-from file_manager import FileManage
-from hyperloglog import HyperLogLogEngine, HyperLogLogPlusPlus
+
+from nat_traversal import NATTraversalManager
+
+from gossip_protocol import GossipNode
+
+from lua_sandbox import ScriptStore
+
+from openapi_spec import OpenAPIOrchestrator
+
+from graphql_sub import GraphQLSubscriptionEngine
+
+from webhook_delivery import WebhookDeliveryEngine
+
+from py_preprocessor import PreprocessorEngine
+
 from algebraic_effects import AlgebraicEffectsEngine
- main
 
 
 @dataclass
@@ -86,6 +98,7 @@ try:
 except ImportError:
     from contracts import DataProvider, DataProcessor, AppRunner  # type: ignore[import-untyped]
 
+from count_min_sketch import CountMinSketchEngine, HeavyHitter, FrequencyEstimator
 from merkle_tree import MerkleTree, IncrementalStateReplicator
 
 
@@ -125,11 +138,11 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._hll_engine = HyperLogLogEngine()
+        self._freq_est = CountMinSketchEngine()
         self._replicator = IncrementalStateReplicator()
         self._guard = ResourceGuard('BaseApp', self.output_dir)
         self._effects = AlgebraicEffectsEngine()
- main
+    main
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -628,46 +641,56 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    # ── HyperLogLog++ cardinality estimation ──────────────────────────
+    # ── Count-Min Sketch frequency estimation ──────────────────────────
 
-    def hll_create(self, name: str = 'default', p: int = 14) -> HyperLogLogPlusPlus:
-        return self._hll_engine.create(name, p)
+    def freq_create(self, name: str = 'default', epsilon: float = 0.01,
+                    delta: float = 0.99, top_k: int = 20) -> FrequencyEstimator:
+        return self._freq_est.create_estimator(name, epsilon, delta, top_k)
 
-    def hll_add(self, item: Hashable, name: str = 'default') -> None:
-        self._hll_engine.add(item, name)
+    def freq_add(self, item: Hashable, count: int = 1, name: str = 'default') -> None:
+        self._freq_est.add(item, count, name)
 
-    def hll_add_batch(self, items: List[Hashable], name: str = 'default') -> None:
-        self._hll_engine.add_batch(items, name)
+    def freq_add_batch(self, items: List[Hashable], name: str = 'default') -> None:
+        self._freq_est.add_batch(items, name)
 
-    def hll_estimate(self, name: str = 'default') -> float:
-        return self._hll_engine.estimate(name)
+    def freq_estimate(self, item: Hashable, name: str = 'default') -> int:
+        return self._freq_est.estimate(item, name)
 
-    def hll_merge(self, dst: str, src: str) -> bool:
-        return self._hll_engine.merge(dst, src)
+    def freq_estimate_confidence(self, item: Hashable, name: str = 'default') -> Dict[str, float]:
+        return self._freq_est.estimate_confidence(item, name)
 
-    def hll_register_count(self, name: str = 'default') -> int:
-        return self._hll_engine.register_count(name)
+    def freq_top_k(self, name: str = 'default') -> List[HeavyHitter]:
+        return self._freq_est.top_k(name)
 
-    def hll_clear(self, name: str = 'default') -> None:
-        self._hll_engine.clear(name)
+    def freq_total(self, name: str = 'default') -> int:
+        return self._freq_est.total(name)
 
-    def hll_clear_all(self) -> None:
-        self._hll_engine.clear_all()
+    def freq_merge(self, dst: str, src: str) -> bool:
+        return self._freq_est.merge(dst, src)
 
-    def hll_snapshot(self, name: str = 'default') -> int:
-        return self._hll_engine.snapshot(name)
+    def freq_inner_product(self, name_a: str, name_b: str) -> Optional[int]:
+        return self._freq_est.inner_product(name_a, name_b)
 
-    def hll_history(self, n: int = 10) -> List[Dict[str, Any]]:
-        return self._hll_engine.history(n)
+    def freq_clear(self, name: str = 'default') -> None:
+        self._freq_est.clear(name)
 
-    def hll_summary(self) -> Dict[str, Any]:
-        return self._hll_engine.summary()
+    def freq_clear_all(self) -> None:
+        self._freq_est.clear_all()
 
-    def hll_list(self) -> List[str]:
-        return self._hll_engine.list()
+    def freq_snapshot(self, name: str = 'default') -> int:
+        return self._freq_est.snapshot(name)
 
-    def hll_remove(self, name: str) -> bool:
-        return self._hll_engine.remove(name)
+    def freq_history(self, n: int = 10) -> List[Dict[str, Any]]:
+        return self._freq_est.history(n)
+
+    def freq_summary(self) -> Dict[str, Any]:
+        return self._freq_est.summary()
+
+    def freq_list(self) -> List[str]:
+        return self._freq_est.list_estimators()
+
+    def freq_remove(self, name: str) -> bool:
+        return self._freq_est.remove_estimator(name)
     def ae_register(self, effect_type: str,
                     handler_fn: Optional[Callable[[Any], Any]] = None) -> None:
         self._effects.register_handler(effect_type, handler_fn)
@@ -700,7 +723,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
     def bh_execute(self, group: str, fn: Callable[..., Any],
                    *args: Any, **kwargs: Any) -> Any:
         return self._bulkhead.execute(group, fn, *args, **kwargs)
- main
+    main
 
     def bh_io(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         return self._bulkhead.execute_io(fn, *args, **kwargs)
