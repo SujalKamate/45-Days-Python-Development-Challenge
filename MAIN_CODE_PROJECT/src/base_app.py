@@ -37,7 +37,7 @@ from webhook_delivery import WebhookDeliveryEngine
 
 from py_preprocessor import PreprocessorEngine
 
-from deadline_context import DeadlineContextEngine
+from debug_repl import DebugREPLEngine
 
 
 @dataclass
@@ -137,9 +137,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir)
-        self._deadline_ctx = DeadlineContextEngine()
+        self._debug = DebugREPLEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -638,57 +636,31 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def dc_create(self, deadline_s: float = 0,
-                  metadata: Optional[Dict[str, Any]] = None) -> Any:
-        return self._deadline_ctx.create_context(deadline_s, metadata)
+    def dbg_register_module(self, name: str, module: Any) -> None:
+        self._debug.register_module(name, module)
 
-    def dc_child(self, deadline_s: float = 0,
-                 metadata: Optional[Dict[str, Any]] = None) -> Optional[Any]:
-        return self._deadline_ctx.create_child_context(deadline_s, metadata)
+    def dbg_register_callable(self, name: str, fn: Callable[..., Any]) -> None:
+        self._debug.register_callable(name, fn)
 
-    def dc_current(self) -> Optional[Any]:
-        return self._deadline_ctx.current_context()
+    def dbg_trace(self, fn: Callable[..., Any], *args: Any,
+                  label: str = '', **kwargs: Any) -> Dict[str, Any]:
+        return self._debug.trace_execution(fn, *args, label=label, **kwargs)
 
-    def dc_clear(self) -> None:
-        self._deadline_ctx.clear_context()
+    def dbg_trace_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._debug.trace_history(limit)
 
-    def dc_execute(self, fn: Callable[..., Any], *args: Any,
-                   deadline_s: float = 0,
-                   context: Optional[Any] = None, **kwargs: Any) -> Any:
-        return self._deadline_ctx.execute(fn, *args, deadline_s=deadline_s,
-                                          context=context, **kwargs)
+    def dbg_snapshot(self, key: str) -> None:
+        self._debug.snapshot_state(key, self._debug.inspector.state_snapshot(self))
 
-    def dc_check(self, min_remaining: float = 0.1) -> None:
-        self._deadline_ctx.check_deadline(min_remaining)
+    def dbg_start_repl(self) -> None:
+        self._debug.register_module('base_app', self)
+        self._debug.register_callable('run', self.run)
+        self._debug.register_callable('dataset', self.dataset)
+        self._debug.register_callable('process_dataset', self.process_dataset)
+        self._debug.start_repl()
 
-    def dc_has_time(self, required_s: float = 1.0) -> bool:
-        return self._deadline_ctx.has_time(required_s)
+    def dbg_summary(self) -> Dict[str, Any]:
+        return self._debug.summary()
 
-    def dc_summary(self) -> Dict[str, Any]:
-        return self._deadline_ctx.summary()
-
-    def dc_report(self) -> str:
-        return self._deadline_ctx.report_text()
-
-    def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
-        self._pinner.pin_host(host, fingerprints)
-
-    def gossip_stop(self) -> None:
-        if self._gossip:
-            self._gossip.stop()
-
-    def gossip_set_data(self, key: str, value: Any) -> None:
-        if self._gossip:
-            self._gossip.set_data(key, value)
-
-    def gossip_get_data(self, key: str) -> Optional[Any]:
-        return self._gossip.get_data(key) if self._gossip else None
-
-    def gossip_node_id(self) -> str:
-        return self._gossip.node_id if self._gossip else ''
-
-    def gossip_summary(self) -> Dict[str, Any]:
-        return self._gossip.summary() if self._gossip else {}
-
-    def gossip_export_artifacts(self, dir: str) -> List[str]:
-        return self._gossip.export_artifacts(dir) if self._gossip else []
+    def dbg_report(self) -> str:
+        return self._debug.report_text()
