@@ -203,11 +203,15 @@ Welcome to the **45 Days Python Development Challenge** — a complete journey f
 
 <img src="https://user-images.githubusercontent.com/74038190/212284100-561aa473-3905-4a80-b561-0d28506553ee.gif" width="150%">
 
-# 🔗 Repository Link
+# 🔗 Repository Quick Links
 
 ## 🌐 GitHub Repository
 
 👉 [45-Days-Python-Development-Challenge](https://github.com/abhisek2004/45-Days-Python-Development-Challenge?utm_source=chatgpt.com)
+
+## 🏛️ Architecture Documentation
+
+👉 [Comprehensive Repository Architecture Overview Documentation](.project-docs/ARCHITECTURE.md)
 
 ---
 
