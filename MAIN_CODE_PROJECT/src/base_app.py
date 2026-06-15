@@ -22,7 +22,18 @@ from json_depth_guard import safe_json_loads
 from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
-from file_manager import FileManage
+
+from nat_traversal import NATTraversalManager
+
+from gossip_protocol import GossipNode
+
+from lua_sandbox import ScriptStore
+
+from openapi_spec import OpenAPIOrchestrator
+
+from graphql_sub import GraphQLSubscriptionEngine
+
+from webhook_delivery import WebhookDeliveryEngine
 
 from py_preprocessor import PreprocessorEngine
 
@@ -124,7 +135,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._preproc = PreprocessorEngine()
+        self._gossip: Optional[GossipNode] = None
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -614,7 +625,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.report_metrics()
 
     def finalize(self) -> None:
-        self._entropy.stop_monitoring()
+        if self._gossip:
+            self._gossip.stop()
         with self._time_it('export_state'):
             self.export_state()
         with self.state._lock:
@@ -622,30 +634,28 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def pp_parse(self, source: str) -> List[Any]:
-        return self._preproc.parse(source)
+    def gossip_start(self, host: str = '0.0.0.0', port: int = 0,
+                     seed_hosts: Optional[List[Tuple[str, int]]] = None) -> GossipNode:
+        self._gossip = GossipNode(host, port, seed_hosts or [])
+        self._gossip.start()
+        return self._gossip
 
-    def pp_plan(self, module_name: str, source: str) -> Any:
-        return self._preproc.plan_from_source(module_name, source)
+    def gossip_stop(self) -> None:
+        if self._gossip:
+            self._gossip.stop()
 
-    def pp_execute(self, fn: Callable[..., Any], plan: Any,
-                   *args: Any, **kwargs: Any) -> Any:
-        return self._preproc.execute(fn, plan, *args, **kwargs)
+    def gossip_set_data(self, key: str, value: Any) -> None:
+        if self._gossip:
+            self._gossip.set_data(key, value)
 
-    def pp_register_directive(self, name: str, handler: Callable) -> None:
-        self._preproc.register_directive(name, handler)
+    def gossip_get_data(self, key: str) -> Optional[Any]:
+        return self._gossip.get_data(key) if self._gossip else None
 
-    def pp_unregister_directive(self, name: str) -> bool:
-        return self._preproc.unregister_directive(name)
+    def gossip_node_id(self) -> str:
+        return self._gossip.node_id if self._gossip else ''
 
-    def pp_list_directives(self) -> List[str]:
-        return self._preproc.list_directives()
+    def gossip_summary(self) -> Dict[str, Any]:
+        return self._gossip.summary() if self._gossip else {}
 
-    def pp_history(self, limit: int = 100) -> List[Dict[str, Any]]:
-        return self._preproc.history(limit)
-
-    def pp_summary(self) -> Dict[str, Any]:
-        return self._preproc.summary()
-
-    def pp_report(self) -> str:
-        return self._preproc.report_text()
+    def gossip_export_artifacts(self, dir: str) -> List[str]:
+        return self._gossip.export_artifacts(dir) if self._gossip else []
