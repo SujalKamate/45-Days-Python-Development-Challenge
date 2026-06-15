@@ -37,7 +37,7 @@ from webhook_delivery import WebhookDeliveryEngine
 
 from py_preprocessor import PreprocessorEngine
 
-from degradation import GracefulDegradationEngine
+from debug_repl import DebugREPLEngine
 
 
 @dataclass
@@ -137,9 +137,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir)
-        self._degradation = GracefulDegradationEngine()
+        self._debug = DebugREPLEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -638,64 +636,31 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def dg_register(self, name: str, criticality: str = 'non_critical',
-                    primary: Optional[Callable[..., Any]] = None,
-                    fallbacks: Optional[List[Callable[..., Any]]] = None,
-                    default_value: Any = None) -> None:
-        self._degradation.register_dependency(name, criticality, primary, fallbacks, default_value)
+    def dbg_register_module(self, name: str, module: Any) -> None:
+        self._debug.register_module(name, module)
 
-    def dg_resolve(self, name: str, module: str = '',
-                   *args: Any, **kwargs: Any) -> Any:
-        return self._degradation.resolve(name, module, *args, **kwargs)
+    def dbg_register_callable(self, name: str, fn: Callable[..., Any]) -> None:
+        self._debug.register_callable(name, fn)
 
-    def dg_mark_degraded(self, module: str, dependency: str,
-                         severity: str = 'warning', message: str = '',
-                         root_cause: str = '') -> Any:
-        return self._degradation.mark_degraded(module, dependency, severity, message, root_cause)
+    def dbg_trace(self, fn: Callable[..., Any], *args: Any,
+                  label: str = '', **kwargs: Any) -> Dict[str, Any]:
+        return self._debug.trace_execution(fn, *args, label=label, **kwargs)
 
-    def dg_mark_recovered(self, module: str, message: str = '') -> Any:
-        return self._degradation.mark_recovered(module, message)
+    def dbg_trace_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._debug.trace_history(limit)
 
-    def dg_is_degraded(self, module: str) -> bool:
-        return self._degradation.is_degraded(module)
+    def dbg_snapshot(self, key: str) -> None:
+        self._debug.snapshot_state(key, self._debug.inspector.state_snapshot(self))
 
-    def dg_skip_non_essential(self, skip: bool) -> None:
-        self._degradation.set_skip_non_essential(skip)
+    def dbg_start_repl(self) -> None:
+        self._debug.register_module('base_app', self)
+        self._debug.register_callable('run', self.run)
+        self._debug.register_callable('dataset', self.dataset)
+        self._debug.register_callable('process_dataset', self.process_dataset)
+        self._debug.start_repl()
 
-    def dg_should_skip(self) -> bool:
-        return self._degradation.should_skip()
+    def dbg_summary(self) -> Dict[str, Any]:
+        return self._debug.summary()
 
-    def dg_start_endpoint(self, host: str = '0.0.0.0', port: int = 8902) -> None:
-        self._degradation.start_monitoring_endpoint(host, port)
-
-    def dg_stop_endpoint(self) -> None:
-        self._degradation.stop_monitoring_endpoint()
-
-    def dg_summary(self) -> Dict[str, Any]:
-        return self._degradation.summary()
-
-    def dg_report(self) -> str:
-        return self._degradation.report_text()
-
-    def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
-        self._pinner.pin_host(host, fingerprints)
-
-    def gossip_stop(self) -> None:
-        if self._gossip:
-            self._gossip.stop()
-
-    def gossip_set_data(self, key: str, value: Any) -> None:
-        if self._gossip:
-            self._gossip.set_data(key, value)
-
-    def gossip_get_data(self, key: str) -> Optional[Any]:
-        return self._gossip.get_data(key) if self._gossip else None
-
-    def gossip_node_id(self) -> str:
-        return self._gossip.node_id if self._gossip else ''
-
-    def gossip_summary(self) -> Dict[str, Any]:
-        return self._gossip.summary() if self._gossip else {}
-
-    def gossip_export_artifacts(self, dir: str) -> List[str]:
-        return self._gossip.export_artifacts(dir) if self._gossip else []
+    def dbg_report(self) -> str:
+        return self._debug.report_text()
