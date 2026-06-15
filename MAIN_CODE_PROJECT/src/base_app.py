@@ -37,7 +37,7 @@ from webhook_delivery import WebhookDeliveryEngine
 
 from py_preprocessor import PreprocessorEngine
 
-from refinement_types import ContractEngine
+from bulkhead import BulkheadEngine
 
 
 @dataclass
@@ -139,7 +139,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._next_id: int = 0
         self._replicator = IncrementalStateReplicator()
         self._guard = ResourceGuard('BaseApp', self.output_dir)
-        self._contract = ContractEngine()
+        self._bulkhead = BulkheadEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -638,58 +638,56 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def ct_refine(self, base_type: type, predicate: Callable[[Any], bool],
-                  name: str = '') -> Any:
-        return self._contract.refine(base_type, predicate, name)
+    def bh_execute(self, group: str, fn: Callable[..., Any],
+                   *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute(group, fn, *args, **kwargs)
 
-    def ct_check(self, value: Any, refined_type: Any, label: str = 'value') -> Any:
-        return self._contract.check_value(value, refined_type, label)
+    def bh_io(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_io(fn, *args, **kwargs)
 
-    def ct_require(self, fn: Callable[..., Any],
-                   predicate: Callable[..., bool],
-                   desc: str = '') -> Callable[..., Any]:
-        return self._contract.require(fn, predicate, desc)
+    def bh_cpu(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_cpu(fn, *args, **kwargs)
 
-    def ct_ensure(self, fn: Callable[..., Any],
-                  predicate: Callable[[Any], bool],
-                  desc: str = '') -> Callable[..., Any]:
-        return self._contract.ensure(fn, predicate, desc)
+    def bh_network(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_network(fn, *args, **kwargs)
 
-    def ct_invariant(self, cls: type, predicate: Callable[[Any], bool],
-                     desc: str = '') -> type:
-        return self._contract.invariant(cls, predicate, desc)
+    def bh_create_group(self, name: str, max_conc: int = 10, queue: int = 20) -> Any:
+        return self._bulkhead.create_group(name, max_conc, queue)
 
-    def ct_set_enabled(self, enabled: bool) -> None:
-        self._contract.set_enabled(enabled)
+    def bh_metrics(self, name: str) -> Optional[Dict[str, Any]]:
+        return self._bulkhead.group_metrics(name)
 
-    def ct_violations(self) -> List[Dict[str, Any]]:
-        return self._contract.violation_history()
+    def bh_summary(self) -> Dict[str, Any]:
+        return self._bulkhead.summary()
 
-    def ct_summary(self) -> Dict[str, Any]:
-        return self._contract.summary()
-
-    def ct_report(self) -> str:
-        return self._contract.report_text()
+    def bh_report(self) -> str:
+        return self._bulkhead.report_text()
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
 
-    def gossip_stop(self) -> None:
-        if self._gossip:
-            self._gossip.stop()
+    def dbg_register_callable(self, name: str, fn: Callable[..., Any]) -> None:
+        self._debug.register_callable(name, fn)
 
-    def gossip_set_data(self, key: str, value: Any) -> None:
-        if self._gossip:
-            self._gossip.set_data(key, value)
+    def dbg_trace(self, fn: Callable[..., Any], *args: Any,
+                  label: str = '', **kwargs: Any) -> Dict[str, Any]:
+        return self._debug.trace_execution(fn, *args, label=label, **kwargs)
 
-    def gossip_get_data(self, key: str) -> Optional[Any]:
-        return self._gossip.get_data(key) if self._gossip else None
+    def dbg_trace_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._debug.trace_history(limit)
 
-    def gossip_node_id(self) -> str:
-        return self._gossip.node_id if self._gossip else ''
+    def dbg_snapshot(self, key: str) -> None:
+        self._debug.snapshot_state(key, self._debug.inspector.state_snapshot(self))
 
-    def gossip_summary(self) -> Dict[str, Any]:
-        return self._gossip.summary() if self._gossip else {}
+    def dbg_start_repl(self) -> None:
+        self._debug.register_module('base_app', self)
+        self._debug.register_callable('run', self.run)
+        self._debug.register_callable('dataset', self.dataset)
+        self._debug.register_callable('process_dataset', self.process_dataset)
+        self._debug.start_repl()
 
-    def gossip_export_artifacts(self, dir: str) -> List[str]:
-        return self._gossip.export_artifacts(dir) if self._gossip else []
+    def dbg_summary(self) -> Dict[str, Any]:
+        return self._debug.summary()
+
+    def dbg_report(self) -> str:
+        return self._debug.report_text()
