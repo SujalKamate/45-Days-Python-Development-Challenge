@@ -37,7 +37,7 @@ from webhook_delivery import WebhookDeliveryEngine
 
 from py_preprocessor import PreprocessorEngine
 
-from env_config import EnvConfigEngine
+from debug_repl import DebugREPLEngine
 
 
 @dataclass
@@ -137,7 +137,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._env_config = EnvConfigEngine()
+        self._debug = DebugREPLEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -636,48 +636,31 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def ec_set_config(self, config: Dict[str, Any]) -> None:
-        self._env_config.set_config(config)
+    def dbg_register_module(self, name: str, module: Any) -> None:
+        self._debug.register_module(name, module)
 
-    def ec_update(self, key: str, value: Any) -> None:
-        self._env_config.update_config(key, value)
+    def dbg_register_callable(self, name: str, fn: Callable[..., Any]) -> None:
+        self._debug.register_callable(name, fn)
 
-    def ec_get(self, key: str, default: Any = None) -> Any:
-        return self._env_config.get_config(key, default)
+    def dbg_trace(self, fn: Callable[..., Any], *args: Any,
+                  label: str = '', **kwargs: Any) -> Dict[str, Any]:
+        return self._debug.trace_execution(fn, *args, label=label, **kwargs)
 
-    def ec_load_env(self, prefix: str = 'APP_') -> None:
-        self._env_config.load_from_env(prefix)
+    def dbg_trace_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._debug.trace_history(limit)
 
-    def ec_validate(self, profile: str = '') -> Any:
-        return self._env_config.validate(profile)
+    def dbg_snapshot(self, key: str) -> None:
+        self._debug.snapshot_state(key, self._debug.inspector.state_snapshot(self))
 
-    def ec_validate_all(self) -> Dict[str, Any]:
-        return self._env_config.validate_all_profiles()
+    def dbg_start_repl(self) -> None:
+        self._debug.register_module('base_app', self)
+        self._debug.register_callable('run', self.run)
+        self._debug.register_callable('dataset', self.dataset)
+        self._debug.register_callable('process_dataset', self.process_dataset)
+        self._debug.start_repl()
 
-    def ec_create_profile(self, name: str, desc: str = '', base: str = '') -> Any:
-        return self._env_config.create_profile(name, desc, base)
+    def dbg_summary(self) -> Dict[str, Any]:
+        return self._debug.summary()
 
-    def ec_add_rule(self, profile: str, key: str, rule_type: str = 'required',
-                    expected_type: Optional[str] = None,
-                    min_value: Optional[float] = None,
-                    max_value: Optional[float] = None,
-                    allowed: Optional[List[Any]] = None,
-                    pattern: Optional[str] = None,
-                    severity: str = 'error') -> None:
-        from env_config import ConfigRule
-        self._env_config.add_rule(profile, ConfigRule(
-            key, rule_type, expected_type, min_value, max_value,
-            pattern=pattern, allowed_values=allowed, severity=severity,
-        ))
-
-    def ec_readiness(self) -> Dict[str, Any]:
-        return self._env_config.run_readiness()
-
-    def ec_history(self, limit: int = 100) -> List[Dict[str, Any]]:
-        return self._env_config.history(limit)
-
-    def ec_summary(self) -> Dict[str, Any]:
-        return self._env_config.summary()
-
-    def ec_report(self) -> str:
-        return self._env_config.report_text()
+    def dbg_report(self) -> str:
+        return self._debug.report_text()
