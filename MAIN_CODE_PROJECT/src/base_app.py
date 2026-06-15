@@ -37,7 +37,7 @@ from webhook_delivery import WebhookDeliveryEngine
 
 from py_preprocessor import PreprocessorEngine
 
-from genetic_optimizer import GeneticOptimizationEngine
+from bulkhead import BulkheadEngine
 
 
 @dataclass
@@ -139,7 +139,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._next_id: int = 0
         self._replicator = IncrementalStateReplicator()
         self._guard = ResourceGuard('BaseApp', self.output_dir)
-        self._genetic = GeneticOptimizationEngine()
+        self._bulkhead = BulkheadEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -638,47 +638,56 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def ga_optimize(self, gene_defs: List[Dict[str, Any]],
-                    fitness_fn: Callable[[Dict[str, Any]], float],
-                    pop_size: int = 20, generations: int = 10,
-                    mutation_rate: float = 0.1,
-                    label: str = '') -> Any:
-        return self._genetic.optimize(
-            gene_defs, fitness_fn, pop_size, generations,
-            mutation_rate, label=label,
-        )
+    def bh_execute(self, group: str, fn: Callable[..., Any],
+                   *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute(group, fn, *args, **kwargs)
 
-    def ga_history(self) -> List[Dict[str, Any]]:
-        return self._genetic.run_history()
+    def bh_io(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_io(fn, *args, **kwargs)
 
-    def ga_last(self) -> Optional[Dict[str, Any]]:
-        return self._genetic.last_result()
+    def bh_cpu(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_cpu(fn, *args, **kwargs)
 
-    def ga_summary(self) -> Dict[str, Any]:
-        return self._genetic.summary()
+    def bh_network(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_network(fn, *args, **kwargs)
 
-    def ga_report(self) -> str:
-        return self._genetic.report_text()
+    def bh_create_group(self, name: str, max_conc: int = 10, queue: int = 20) -> Any:
+        return self._bulkhead.create_group(name, max_conc, queue)
+
+    def bh_metrics(self, name: str) -> Optional[Dict[str, Any]]:
+        return self._bulkhead.group_metrics(name)
+
+    def bh_summary(self) -> Dict[str, Any]:
+        return self._bulkhead.summary()
+
+    def bh_report(self) -> str:
+        return self._bulkhead.report_text()
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
 
-    def gossip_stop(self) -> None:
-        if self._gossip:
-            self._gossip.stop()
+    def dbg_register_callable(self, name: str, fn: Callable[..., Any]) -> None:
+        self._debug.register_callable(name, fn)
 
-    def gossip_set_data(self, key: str, value: Any) -> None:
-        if self._gossip:
-            self._gossip.set_data(key, value)
+    def dbg_trace(self, fn: Callable[..., Any], *args: Any,
+                  label: str = '', **kwargs: Any) -> Dict[str, Any]:
+        return self._debug.trace_execution(fn, *args, label=label, **kwargs)
 
-    def gossip_get_data(self, key: str) -> Optional[Any]:
-        return self._gossip.get_data(key) if self._gossip else None
+    def dbg_trace_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._debug.trace_history(limit)
 
-    def gossip_node_id(self) -> str:
-        return self._gossip.node_id if self._gossip else ''
+    def dbg_snapshot(self, key: str) -> None:
+        self._debug.snapshot_state(key, self._debug.inspector.state_snapshot(self))
 
-    def gossip_summary(self) -> Dict[str, Any]:
-        return self._gossip.summary() if self._gossip else {}
+    def dbg_start_repl(self) -> None:
+        self._debug.register_module('base_app', self)
+        self._debug.register_callable('run', self.run)
+        self._debug.register_callable('dataset', self.dataset)
+        self._debug.register_callable('process_dataset', self.process_dataset)
+        self._debug.start_repl()
 
-    def gossip_export_artifacts(self, dir: str) -> List[str]:
-        return self._gossip.export_artifacts(dir) if self._gossip else []
+    def dbg_summary(self) -> Dict[str, Any]:
+        return self._debug.summary()
+
+    def dbg_report(self) -> str:
+        return self._debug.report_text()
