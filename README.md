@@ -209,9 +209,7 @@ Welcome to the **45 Days Python Development Challenge** — a complete journey f
 
 👉 [45-Days-Python-Development-Challenge](https://github.com/abhisek2004/45-Days-Python-Development-Challenge?utm_source=chatgpt.com)
 
-## 🏛️ Architecture Documentation
 
-👉 [Comprehensive Repository Architecture Overview Documentation](.project-docs/ARCHITECTURE.md)
 
 ---
 
