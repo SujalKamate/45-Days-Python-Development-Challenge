@@ -37,7 +37,7 @@ from webhook_delivery import WebhookDeliveryEngine
 
 from py_preprocessor import PreprocessorEngine
 
-from circuit_breaker import CircuitBreakerEngine
+from debug_repl import DebugREPLEngine
 
 
 @dataclass
@@ -137,9 +137,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir)
-        self._circuit = CircuitBreakerEngine()
+        self._debug = DebugREPLEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -638,65 +636,31 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def cb_get_breaker(self, resource: str, threshold: int = 5,
-                       cooldown: float = 30.0, window: float = 60.0,
-                       probe: Optional[Callable[[], bool]] = None) -> Any:
-        return self._circuit.get_breaker(resource, threshold, cooldown, window, probe)
+    def dbg_register_module(self, name: str, module: Any) -> None:
+        self._debug.register_module(name, module)
 
-    def cb_protect(self, fn: Callable[..., Any], resource: str,
-                   *args: Any, **kwargs: Any) -> Any:
-        return self._circuit.protect(fn, resource, *args, **kwargs)
+    def dbg_register_callable(self, name: str, fn: Callable[..., Any]) -> None:
+        self._debug.register_callable(name, fn)
 
-    def cb_http_get(self, url: str, resource: str = '', timeout: float = 10.0) -> bytes:
-        return self._circuit.http_get(url, resource, timeout)
+    def dbg_trace(self, fn: Callable[..., Any], *args: Any,
+                  label: str = '', **kwargs: Any) -> Dict[str, Any]:
+        return self._debug.trace_execution(fn, *args, label=label, **kwargs)
 
-    def cb_file_read(self, path: str, resource: str = '') -> str:
-        return self._circuit.file_read(path, resource)
+    def dbg_trace_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._debug.trace_history(limit)
 
-    def cb_file_write(self, path: str, content: str, resource: str = '') -> None:
-        self._circuit.file_write(path, content, resource)
+    def dbg_snapshot(self, key: str) -> None:
+        self._debug.snapshot_state(key, self._debug.inspector.state_snapshot(self))
 
-    def cb_subprocess(self, cmd: List[str], resource: str = '', timeout: float = 30.0) -> Any:
-        return self._circuit.subprocess_run(cmd, resource, timeout)
+    def dbg_start_repl(self) -> None:
+        self._debug.register_module('base_app', self)
+        self._debug.register_callable('run', self.run)
+        self._debug.register_callable('dataset', self.dataset)
+        self._debug.register_callable('process_dataset', self.process_dataset)
+        self._debug.start_repl()
 
-    def cb_reset_all(self) -> None:
-        self._circuit.reset_all()
+    def dbg_summary(self) -> Dict[str, Any]:
+        return self._debug.summary()
 
-    def cb_state(self, resource: str) -> str:
-        b = self._circuit.registry.get(resource)
-        return b.state if b else 'unknown'
-
-    def cb_start_endpoint(self, host: str = '0.0.0.0', port: int = 8903) -> None:
-        self._circuit.start_endpoint(host, port)
-
-    def cb_stop_endpoint(self) -> None:
-        self._circuit.stop_endpoint()
-
-    def cb_summary(self) -> Dict[str, Any]:
-        return self._circuit.summary()
-
-    def cb_report(self) -> str:
-        return self._circuit.report_text()
-
-    def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
-        self._pinner.pin_host(host, fingerprints)
-
-    def gossip_stop(self) -> None:
-        if self._gossip:
-            self._gossip.stop()
-
-    def gossip_set_data(self, key: str, value: Any) -> None:
-        if self._gossip:
-            self._gossip.set_data(key, value)
-
-    def gossip_get_data(self, key: str) -> Optional[Any]:
-        return self._gossip.get_data(key) if self._gossip else None
-
-    def gossip_node_id(self) -> str:
-        return self._gossip.node_id if self._gossip else ''
-
-    def gossip_summary(self) -> Dict[str, Any]:
-        return self._gossip.summary() if self._gossip else {}
-
-    def gossip_export_artifacts(self, dir: str) -> List[str]:
-        return self._gossip.export_artifacts(dir) if self._gossip else []
+    def dbg_report(self) -> str:
+        return self._debug.report_text()
