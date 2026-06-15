@@ -29,6 +29,8 @@ from gossip_protocol import GossipNode
 
 from lua_sandbox import ScriptStore
 
+from openapi_spec import OpenAPIOrchestrator
+
 
 @dataclass
 class DataPoint:
