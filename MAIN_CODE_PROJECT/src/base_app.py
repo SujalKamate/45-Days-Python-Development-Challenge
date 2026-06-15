@@ -5,7 +5,7 @@ from copy import deepcopy as _deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Dict, Generator, Hashable, List, Optional, Tuple
 import json
 import math
 import os
@@ -22,7 +22,22 @@ from json_depth_guard import safe_json_loads
 from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
-from file_manager import FileManage
+
+from nat_traversal import NATTraversalManager
+
+from gossip_protocol import GossipNode
+
+from lua_sandbox import ScriptStore
+
+from openapi_spec import OpenAPIOrchestrator
+
+from graphql_sub import GraphQLSubscriptionEngine
+
+from webhook_delivery import WebhookDeliveryEngine
+
+from py_preprocessor import PreprocessorEngine
+
+from algebraic_effects import AlgebraicEffectsEngine
 
 
 @dataclass
@@ -83,6 +98,7 @@ try:
 except ImportError:
     from contracts import DataProvider, DataProcessor, AppRunner  # type: ignore[import-untyped]
 
+from count_min_sketch import CountMinSketchEngine, HeavyHitter, FrequencyEstimator
 from merkle_tree import MerkleTree, IncrementalStateReplicator
 
 
@@ -122,8 +138,11 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
+        self._freq_est = CountMinSketchEngine()
         self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
+        self._effects = AlgebraicEffectsEngine()
+    main
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -613,7 +632,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.report_metrics()
 
     def finalize(self) -> None:
-        self._entropy.stop_monitoring()
+        if self._gossip:
+            self._gossip.stop()
         with self._time_it('export_state'):
             self.export_state()
         with self.state._lock:
@@ -621,23 +641,136 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
+    # ── Count-Min Sketch frequency estimation ──────────────────────────
+
+    def freq_create(self, name: str = 'default', epsilon: float = 0.01,
+                    delta: float = 0.99, top_k: int = 20) -> FrequencyEstimator:
+        return self._freq_est.create_estimator(name, epsilon, delta, top_k)
+
+    def freq_add(self, item: Hashable, count: int = 1, name: str = 'default') -> None:
+        self._freq_est.add(item, count, name)
+
+    def freq_add_batch(self, items: List[Hashable], name: str = 'default') -> None:
+        self._freq_est.add_batch(items, name)
+
+    def freq_estimate(self, item: Hashable, name: str = 'default') -> int:
+        return self._freq_est.estimate(item, name)
+
+    def freq_estimate_confidence(self, item: Hashable, name: str = 'default') -> Dict[str, float]:
+        return self._freq_est.estimate_confidence(item, name)
+
+    def freq_top_k(self, name: str = 'default') -> List[HeavyHitter]:
+        return self._freq_est.top_k(name)
+
+    def freq_total(self, name: str = 'default') -> int:
+        return self._freq_est.total(name)
+
+    def freq_merge(self, dst: str, src: str) -> bool:
+        return self._freq_est.merge(dst, src)
+
+    def freq_inner_product(self, name_a: str, name_b: str) -> Optional[int]:
+        return self._freq_est.inner_product(name_a, name_b)
+
+    def freq_clear(self, name: str = 'default') -> None:
+        self._freq_est.clear(name)
+
+    def freq_clear_all(self) -> None:
+        self._freq_est.clear_all()
+
+    def freq_snapshot(self, name: str = 'default') -> int:
+        return self._freq_est.snapshot(name)
+
+    def freq_history(self, n: int = 10) -> List[Dict[str, Any]]:
+        return self._freq_est.history(n)
+
+    def freq_summary(self) -> Dict[str, Any]:
+        return self._freq_est.summary()
+
+    def freq_list(self) -> List[str]:
+        return self._freq_est.list_estimators()
+
+    def freq_remove(self, name: str) -> bool:
+        return self._freq_est.remove_estimator(name)
+    def ae_register(self, effect_type: str,
+                    handler_fn: Optional[Callable[[Any], Any]] = None) -> None:
+        self._effects.register_handler(effect_type, handler_fn)
+
+    def ae_effect(self, effect_type: str, payload: Any = None) -> Any:
+        return self._effects.effect(effect_type, payload)
+
+    def ae_io(self, operation: str, path: str = '', data: Any = None) -> Any:
+        return self._effects.io_effect(operation, path, data)
+
+    def ae_timeout(self, duration_s: float, context: str = '') -> Any:
+        return self._effects.timeout_effect(duration_s, context)
+
+    def ae_validation(self, field: str, value: Any, reason: str = '') -> Any:
+        return self._effects.validation_effect(field, value, reason)
+
+    def ae_process(self, gen_fn: Callable[..., Any],
+                   *args: Any, **kwargs: Any) -> Any:
+        return self._effects.process(gen_fn, *args, **kwargs)
+
+    def ae_summary(self) -> Dict[str, Any]:
+        return self._effects.summary()
+
+    def ae_report(self) -> str:
+        return self._effects.report_text()
+
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
 
-    def tls_unpin_host(self, host: str) -> None:
-        self._pinner.unpin_host(host)
+    def bh_execute(self, group: str, fn: Callable[..., Any],
+                   *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute(group, fn, *args, **kwargs)
+    main
 
-    def tls_rotate_pins(self, host: str, new_fingerprints: List[str], keep_old: bool = True) -> None:
-        self._pinner.rotate_host(host, new_fingerprints, keep_old)
+    def bh_io(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_io(fn, *args, **kwargs)
 
-    def tls_validate(self, host: str, port: int = 443) -> bool:
-        return self._pinner.validate(host, port)
+    def bh_cpu(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_cpu(fn, *args, **kwargs)
 
-    def tls_request(self, url: str, method: str = 'GET', headers: Optional[Dict[str, str]] = None, data: Optional[bytes] = None, timeout: int = 30) -> Optional[bytes]:
-        return self._pinner.validated_request(url, method, headers, data, timeout)
+    def bh_network(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_network(fn, *args, **kwargs)
 
-    def tls_audit_log(self, n: int = 10) -> List[Dict[str, str]]:
-        return self._pinner.audit_log(n)
+    def bh_create_group(self, name: str, max_conc: int = 10, queue: int = 20) -> Any:
+        return self._bulkhead.create_group(name, max_conc, queue)
 
-    def tls_audit_clear(self) -> None:
-        self._pinner.audit_clear()
+    def bh_metrics(self, name: str) -> Optional[Dict[str, Any]]:
+        return self._bulkhead.group_metrics(name)
+
+    def bh_summary(self) -> Dict[str, Any]:
+        return self._bulkhead.summary()
+
+    def bh_report(self) -> str:
+        return self._bulkhead.report_text()
+
+    def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
+        self._pinner.pin_host(host, fingerprints)
+
+    def dbg_register_callable(self, name: str, fn: Callable[..., Any]) -> None:
+        self._debug.register_callable(name, fn)
+
+    def dbg_trace(self, fn: Callable[..., Any], *args: Any,
+                  label: str = '', **kwargs: Any) -> Dict[str, Any]:
+        return self._debug.trace_execution(fn, *args, label=label, **kwargs)
+
+    def dbg_trace_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._debug.trace_history(limit)
+
+    def dbg_snapshot(self, key: str) -> None:
+        self._debug.snapshot_state(key, self._debug.inspector.state_snapshot(self))
+
+    def dbg_start_repl(self) -> None:
+        self._debug.register_module('base_app', self)
+        self._debug.register_callable('run', self.run)
+        self._debug.register_callable('dataset', self.dataset)
+        self._debug.register_callable('process_dataset', self.process_dataset)
+        self._debug.start_repl()
+
+    def dbg_summary(self) -> Dict[str, Any]:
+        return self._debug.summary()
+
+    def dbg_report(self) -> str:
+        return self._debug.report_text()
