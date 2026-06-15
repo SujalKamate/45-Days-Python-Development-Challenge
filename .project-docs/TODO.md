@@ -47,6 +47,7 @@ It is intentionally practical: better lessons, better scripts, better contributo
 
 ## 🧩 Documentation Improvements
 
+- [x] 🧹 Create Python Best Practices Cookbook (`.project-docs/PYTHON_BEST_PRACTICES.md`)
 - [ ] 📦 Keep `.project-docs/INSTALL.md` aligned with repo structure
 - [ ] ❓ Expand `.project-docs/FAQ.md` as recurring questions show up
 - [ ] 🗺️ Keep `.project-docs/ROADMAP.md` updated as weeks/projects are added
