@@ -37,7 +37,7 @@ from webhook_delivery import WebhookDeliveryEngine
 
 from py_preprocessor import PreprocessorEngine
 
-from import_validator import ImportValidationEngine
+from debug_repl import DebugREPLEngine
 
 
 @dataclass
@@ -137,7 +137,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._import_val = ImportValidationEngine()
+        self._debug = DebugREPLEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -636,32 +636,31 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def iv_validate_source(self, source: str, filename: str = '') -> Any:
-        return self._import_val.validate_source(source, filename)
+    def dbg_register_module(self, name: str, module: Any) -> None:
+        self._debug.register_module(name, module)
 
-    def iv_validate_file(self, path: str) -> Any:
-        return self._import_val.validate_file(path)
+    def dbg_register_callable(self, name: str, fn: Callable[..., Any]) -> None:
+        self._debug.register_callable(name, fn)
 
-    def iv_validate_module(self, module_name: str) -> Any:
-        return self._import_val.validate_module(module_name)
+    def dbg_trace(self, fn: Callable[..., Any], *args: Any,
+                  label: str = '', **kwargs: Any) -> Dict[str, Any]:
+        return self._debug.trace_execution(fn, *args, label=label, **kwargs)
 
-    def iv_add_rule(self, rule: Any) -> None:
-        self._import_val.add_rule(rule)
+    def dbg_trace_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._debug.trace_history(limit)
 
-    def iv_remove_rule(self, name: str) -> bool:
-        return self._import_val.remove_rule(name)
+    def dbg_snapshot(self, key: str) -> None:
+        self._debug.snapshot_state(key, self._debug.inspector.state_snapshot(self))
 
-    def iv_list_rules(self) -> List[str]:
-        return self._import_val.list_rules()
+    def dbg_start_repl(self) -> None:
+        self._debug.register_module('base_app', self)
+        self._debug.register_callable('run', self.run)
+        self._debug.register_callable('dataset', self.dataset)
+        self._debug.register_callable('process_dataset', self.process_dataset)
+        self._debug.start_repl()
 
-    def iv_set_strict(self, enabled: bool) -> None:
-        self._import_val.set_strict_mode(enabled)
+    def dbg_summary(self) -> Dict[str, Any]:
+        return self._debug.summary()
 
-    def iv_history(self, limit: int = 100) -> List[Dict[str, Any]]:
-        return self._import_val.validation_history(limit)
-
-    def iv_summary(self) -> Dict[str, Any]:
-        return self._import_val.summary()
-
-    def iv_report(self) -> str:
-        return self._import_val.report_text()
+    def dbg_report(self) -> str:
+        return self._debug.report_text()
