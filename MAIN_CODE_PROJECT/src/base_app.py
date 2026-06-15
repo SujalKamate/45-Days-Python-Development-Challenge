@@ -37,7 +37,7 @@ from webhook_delivery import WebhookDeliveryEngine
 
 from py_preprocessor import PreprocessorEngine
 
-from debug_repl import DebugREPLEngine
+from bulkhead import BulkheadEngine
 
 
 @dataclass
@@ -137,7 +137,9 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._debug = DebugREPLEngine()
+        self._replicator = IncrementalStateReplicator()
+        self._guard = ResourceGuard('BaseApp', self.output_dir)
+        self._bulkhead = BulkheadEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -636,8 +638,33 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def dbg_register_module(self, name: str, module: Any) -> None:
-        self._debug.register_module(name, module)
+    def bh_execute(self, group: str, fn: Callable[..., Any],
+                   *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute(group, fn, *args, **kwargs)
+
+    def bh_io(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_io(fn, *args, **kwargs)
+
+    def bh_cpu(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_cpu(fn, *args, **kwargs)
+
+    def bh_network(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_network(fn, *args, **kwargs)
+
+    def bh_create_group(self, name: str, max_conc: int = 10, queue: int = 20) -> Any:
+        return self._bulkhead.create_group(name, max_conc, queue)
+
+    def bh_metrics(self, name: str) -> Optional[Dict[str, Any]]:
+        return self._bulkhead.group_metrics(name)
+
+    def bh_summary(self) -> Dict[str, Any]:
+        return self._bulkhead.summary()
+
+    def bh_report(self) -> str:
+        return self._bulkhead.report_text()
+
+    def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
+        self._pinner.pin_host(host, fingerprints)
 
     def dbg_register_callable(self, name: str, fn: Callable[..., Any]) -> None:
         self._debug.register_callable(name, fn)
