@@ -27,6 +27,8 @@ from nat_traversal import NATTraversalManager
 
 from gossip_protocol import GossipNode
 
+from lua_sandbox import ScriptStore
+
 
 @dataclass
 class DataPoint:
