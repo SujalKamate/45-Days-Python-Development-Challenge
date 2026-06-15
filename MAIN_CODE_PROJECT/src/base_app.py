@@ -5,7 +5,7 @@ from copy import deepcopy as _deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from typing import Any, Dict, Generator, Hashable, List, Optional, Tuple
 import json
 import math
 import os
@@ -22,10 +22,22 @@ from json_depth_guard import safe_json_loads
 from decimal_utils import Money, safe_decimal
 
 from drift_timer import DriftCorrectedTimer, Stopwatch
-from file_manager import FileManage
-from bloom_cascade import BloomCascadeEngine, BloomCascade, BloomFilterLayer
+
+from nat_traversal import NATTraversalManager
+
+from gossip_protocol import GossipNode
+
+from lua_sandbox import ScriptStore
+
+from openapi_spec import OpenAPIOrchestrator
+
+from graphql_sub import GraphQLSubscriptionEngine
+
+from webhook_delivery import WebhookDeliveryEngine
+
+from py_preprocessor import PreprocessorEngine
+
 from algebraic_effects import AlgebraicEffectsEngine
- main
 
 
 @dataclass
@@ -86,6 +98,7 @@ try:
 except ImportError:
     from contracts import DataProvider, DataProcessor, AppRunner  # type: ignore[import-untyped]
 
+from count_min_sketch import CountMinSketchEngine, HeavyHitter, FrequencyEstimator
 from merkle_tree import MerkleTree, IncrementalStateReplicator
 
 
@@ -125,11 +138,11 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._bloom_cascade = BloomCascadeEngine()
+        self._freq_est = CountMinSketchEngine()
         self._replicator = IncrementalStateReplicator()
         self._guard = ResourceGuard('BaseApp', self.output_dir)
         self._effects = AlgebraicEffectsEngine()
- main
+    main
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -628,54 +641,56 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    # ── Bloom filter cascade membership verification ──────────────────
+    # ── Count-Min Sketch frequency estimation ──────────────────────────
 
-    def bc_create_cascade(self, name: str = 'default') -> BloomCascade:
-        return self._bloom_cascade.create_cascade(name)
+    def freq_create(self, name: str = 'default', epsilon: float = 0.01,
+                    delta: float = 0.99, top_k: int = 20) -> FrequencyEstimator:
+        return self._freq_est.create_estimator(name, epsilon, delta, top_k)
 
-    def bc_add_layer(self, layer: str, n: int = 10000, p: float = 0.01,
-                     m: Optional[int] = None, k: Optional[int] = None,
-                     parent: Optional[str] = None,
-                     cascade_name: str = 'default') -> BloomFilterLayer:
-        return self._bloom_cascade.add_layer(layer, n, p, m, k, parent, cascade_name)
+    def freq_add(self, item: Hashable, count: int = 1, name: str = 'default') -> None:
+        self._freq_est.add(item, count, name)
 
-    def bc_insert(self, layer: str, item: Hashable, cascade_name: str = 'default') -> None:
-        self._bloom_cascade.insert(layer, item, cascade_name)
+    def freq_add_batch(self, items: List[Hashable], name: str = 'default') -> None:
+        self._freq_est.add_batch(items, name)
 
-    def bc_contains(self, layer: str, item: Hashable, cascade_name: str = 'default') -> bool:
-        return self._bloom_cascade.contains(layer, item, cascade_name)
+    def freq_estimate(self, item: Hashable, name: str = 'default') -> int:
+        return self._freq_est.estimate(item, name)
 
-    def bc_hierarchical_contains(self, item: Hashable,
-                                 cascade_name: str = 'default') -> Dict[str, Any]:
-        return self._bloom_cascade.hierarchical_contains(item, cascade_name)
+    def freq_estimate_confidence(self, item: Hashable, name: str = 'default') -> Dict[str, float]:
+        return self._freq_est.estimate_confidence(item, name)
 
-    def bc_cascade_contains(self, item: Hashable, start: str,
-                            cascade_name: str = 'default') -> Dict[str, Any]:
-        return self._bloom_cascade.cascade_contains(item, start, cascade_name)
+    def freq_top_k(self, name: str = 'default') -> List[HeavyHitter]:
+        return self._freq_est.top_k(name)
 
-    def bc_union(self, dst: str, src: str) -> bool:
-        return self._bloom_cascade.union(dst, src)
+    def freq_total(self, name: str = 'default') -> int:
+        return self._freq_est.total(name)
 
-    def bc_intersection(self, dst: str, src: str) -> bool:
-        return self._bloom_cascade.intersection(dst, src)
+    def freq_merge(self, dst: str, src: str) -> bool:
+        return self._freq_est.merge(dst, src)
 
-    def bc_occupancy(self, cascade_name: str = 'default') -> Dict[str, Dict[str, float]]:
-        return self._bloom_cascade.occupancy_report(cascade_name)
+    def freq_inner_product(self, name_a: str, name_b: str) -> Optional[int]:
+        return self._freq_est.inner_product(name_a, name_b)
 
-    def bc_clear_layer(self, layer: str, cascade_name: str = 'default') -> None:
-        self._bloom_cascade.clear_layer(layer, cascade_name)
+    def freq_clear(self, name: str = 'default') -> None:
+        self._freq_est.clear(name)
 
-    def bc_clear_all(self, cascade_name: str = 'default') -> None:
-        self._bloom_cascade.clear_all(cascade_name)
+    def freq_clear_all(self) -> None:
+        self._freq_est.clear_all()
 
-    def bc_summary(self) -> Dict[str, Any]:
-        return self._bloom_cascade.summary()
+    def freq_snapshot(self, name: str = 'default') -> int:
+        return self._freq_est.snapshot(name)
 
-    def bc_list(self) -> List[str]:
-        return self._bloom_cascade.list_cascades()
+    def freq_history(self, n: int = 10) -> List[Dict[str, Any]]:
+        return self._freq_est.history(n)
 
-    def bc_remove(self, name: str) -> bool:
-        return self._bloom_cascade.remove_cascade(name)
+    def freq_summary(self) -> Dict[str, Any]:
+        return self._freq_est.summary()
+
+    def freq_list(self) -> List[str]:
+        return self._freq_est.list_estimators()
+
+    def freq_remove(self, name: str) -> bool:
+        return self._freq_est.remove_estimator(name)
     def ae_register(self, effect_type: str,
                     handler_fn: Optional[Callable[[Any], Any]] = None) -> None:
         self._effects.register_handler(effect_type, handler_fn)
@@ -708,7 +723,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
     def bh_execute(self, group: str, fn: Callable[..., Any],
                    *args: Any, **kwargs: Any) -> Any:
         return self._bulkhead.execute(group, fn, *args, **kwargs)
- main
+    main
 
     def bh_io(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         return self._bulkhead.execute_io(fn, *args, **kwargs)
