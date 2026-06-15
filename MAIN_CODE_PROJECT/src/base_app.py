@@ -37,7 +37,7 @@ from webhook_delivery import WebhookDeliveryEngine
 
 from py_preprocessor import PreprocessorEngine
 
-from canary_deploy import CanaryEngine
+from debug_repl import DebugREPLEngine
 
 
 @dataclass
@@ -137,9 +137,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._replicator = IncrementalStateReplicator()
-        self._guard = ResourceGuard('BaseApp', self.output_dir)
-        self._canary = CanaryEngine()
+        self._debug = DebugREPLEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -638,57 +636,31 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def cn_register(self, module: str, stable_fn: Callable[..., Any],
-                    canary_fn: Callable[..., Any]) -> None:
-        self._canary.register_version(module, stable_fn, canary_fn)
+    def dbg_register_module(self, name: str, module: Any) -> None:
+        self._debug.register_module(name, module)
 
-    def cn_start(self, module: str, version: str, pct: float = 10.0) -> Any:
-        return self._canary.start_deployment(module, version, pct)
+    def dbg_register_callable(self, name: str, fn: Callable[..., Any]) -> None:
+        self._debug.register_callable(name, fn)
 
-    def cn_execute(self, module: str, *args: Any,
-                   dep_id: Optional[str] = None, **kwargs: Any) -> Any:
-        return self._canary.execute(module, *args, deployment_id=dep_id, **kwargs)
+    def dbg_trace(self, fn: Callable[..., Any], *args: Any,
+                  label: str = '', **kwargs: Any) -> Dict[str, Any]:
+        return self._debug.trace_execution(fn, *args, label=label, **kwargs)
 
-    def cn_evaluate(self, dep_id: str) -> Tuple[bool, str]:
-        return self._canary.evaluate_deployment(dep_id)
+    def dbg_trace_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._debug.trace_history(limit)
 
-    def cn_rollback(self, dep_id: str, reason: str = 'manual') -> bool:
-        return self._canary.rollback_deployment(dep_id, reason)
+    def dbg_snapshot(self, key: str) -> None:
+        self._debug.snapshot_state(key, self._debug.inspector.state_snapshot(self))
 
-    def cn_promote(self, dep_id: str) -> bool:
-        return self._canary.promote_deployment(dep_id)
+    def dbg_start_repl(self) -> None:
+        self._debug.register_module('base_app', self)
+        self._debug.register_callable('run', self.run)
+        self._debug.register_callable('dataset', self.dataset)
+        self._debug.register_callable('process_dataset', self.process_dataset)
+        self._debug.start_repl()
 
-    def cn_list(self) -> List[Dict[str, Any]]:
-        return self._canary.list_deployments()
+    def dbg_summary(self) -> Dict[str, Any]:
+        return self._debug.summary()
 
-    def cn_detail(self, dep_id: str) -> Optional[Dict[str, Any]]:
-        return self._canary.deployment_detail(dep_id)
-
-    def cn_summary(self) -> Dict[str, Any]:
-        return self._canary.summary()
-
-    def cn_report(self) -> str:
-        return self._canary.report_text()
-
-    def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
-        self._pinner.pin_host(host, fingerprints)
-
-    def gossip_stop(self) -> None:
-        if self._gossip:
-            self._gossip.stop()
-
-    def gossip_set_data(self, key: str, value: Any) -> None:
-        if self._gossip:
-            self._gossip.set_data(key, value)
-
-    def gossip_get_data(self, key: str) -> Optional[Any]:
-        return self._gossip.get_data(key) if self._gossip else None
-
-    def gossip_node_id(self) -> str:
-        return self._gossip.node_id if self._gossip else ''
-
-    def gossip_summary(self) -> Dict[str, Any]:
-        return self._gossip.summary() if self._gossip else {}
-
-    def gossip_export_artifacts(self, dir: str) -> List[str]:
-        return self._gossip.export_artifacts(dir) if self._gossip else []
+    def dbg_report(self) -> str:
+        return self._debug.report_text()
