@@ -5,7 +5,7 @@ from copy import deepcopy as _deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 import json
 import math
 import os
@@ -24,6 +24,8 @@ from decimal_utils import Money, safe_decimal
 from drift_timer import DriftCorrectedTimer, Stopwatch
 from file_manager import FileManage
 from bloom_cascade import BloomCascadeEngine, BloomCascade, BloomFilterLayer
+from algebraic_effects import AlgebraicEffectsEngine
+ main
 
 
 @dataclass
@@ -126,6 +128,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._bloom_cascade = BloomCascadeEngine()
         self._replicator = IncrementalStateReplicator()
         self._guard = ResourceGuard('BaseApp', self.output_dir)
+        self._effects = AlgebraicEffectsEngine()
+ main
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -615,7 +619,8 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.report_metrics()
 
     def finalize(self) -> None:
-        self._entropy.stop_monitoring()
+        if self._gossip:
+            self._gossip.stop()
         with self._time_it('export_state'):
             self.export_state()
         with self.state._lock:
@@ -671,24 +676,86 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
 
     def bc_remove(self, name: str) -> bool:
         return self._bloom_cascade.remove_cascade(name)
+    def ae_register(self, effect_type: str,
+                    handler_fn: Optional[Callable[[Any], Any]] = None) -> None:
+        self._effects.register_handler(effect_type, handler_fn)
+
+    def ae_effect(self, effect_type: str, payload: Any = None) -> Any:
+        return self._effects.effect(effect_type, payload)
+
+    def ae_io(self, operation: str, path: str = '', data: Any = None) -> Any:
+        return self._effects.io_effect(operation, path, data)
+
+    def ae_timeout(self, duration_s: float, context: str = '') -> Any:
+        return self._effects.timeout_effect(duration_s, context)
+
+    def ae_validation(self, field: str, value: Any, reason: str = '') -> Any:
+        return self._effects.validation_effect(field, value, reason)
+
+    def ae_process(self, gen_fn: Callable[..., Any],
+                   *args: Any, **kwargs: Any) -> Any:
+        return self._effects.process(gen_fn, *args, **kwargs)
+
+    def ae_summary(self) -> Dict[str, Any]:
+        return self._effects.summary()
+
+    def ae_report(self) -> str:
+        return self._effects.report_text()
 
     def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
         self._pinner.pin_host(host, fingerprints)
 
-    def tls_unpin_host(self, host: str) -> None:
-        self._pinner.unpin_host(host)
+    def bh_execute(self, group: str, fn: Callable[..., Any],
+                   *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute(group, fn, *args, **kwargs)
+ main
 
-    def tls_rotate_pins(self, host: str, new_fingerprints: List[str], keep_old: bool = True) -> None:
-        self._pinner.rotate_host(host, new_fingerprints, keep_old)
+    def bh_io(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_io(fn, *args, **kwargs)
 
-    def tls_validate(self, host: str, port: int = 443) -> bool:
-        return self._pinner.validate(host, port)
+    def bh_cpu(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_cpu(fn, *args, **kwargs)
 
-    def tls_request(self, url: str, method: str = 'GET', headers: Optional[Dict[str, str]] = None, data: Optional[bytes] = None, timeout: int = 30) -> Optional[bytes]:
-        return self._pinner.validated_request(url, method, headers, data, timeout)
+    def bh_network(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return self._bulkhead.execute_network(fn, *args, **kwargs)
 
-    def tls_audit_log(self, n: int = 10) -> List[Dict[str, str]]:
-        return self._pinner.audit_log(n)
+    def bh_create_group(self, name: str, max_conc: int = 10, queue: int = 20) -> Any:
+        return self._bulkhead.create_group(name, max_conc, queue)
 
-    def tls_audit_clear(self) -> None:
-        self._pinner.audit_clear()
+    def bh_metrics(self, name: str) -> Optional[Dict[str, Any]]:
+        return self._bulkhead.group_metrics(name)
+
+    def bh_summary(self) -> Dict[str, Any]:
+        return self._bulkhead.summary()
+
+    def bh_report(self) -> str:
+        return self._bulkhead.report_text()
+
+    def tls_pin_host(self, host: str, fingerprints: List[str]) -> None:
+        self._pinner.pin_host(host, fingerprints)
+
+    def dbg_register_callable(self, name: str, fn: Callable[..., Any]) -> None:
+        self._debug.register_callable(name, fn)
+
+    def dbg_trace(self, fn: Callable[..., Any], *args: Any,
+                  label: str = '', **kwargs: Any) -> Dict[str, Any]:
+        return self._debug.trace_execution(fn, *args, label=label, **kwargs)
+
+    def dbg_trace_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._debug.trace_history(limit)
+
+    def dbg_snapshot(self, key: str) -> None:
+        self._debug.snapshot_state(key, self._debug.inspector.state_snapshot(self))
+
+    def dbg_start_repl(self) -> None:
+        self._debug.register_module('base_app', self)
+        self._debug.register_callable('run', self.run)
+        self._debug.register_callable('dataset', self.dataset)
+        self._debug.register_callable('process_dataset', self.process_dataset)
+        self._debug.start_repl()
+
+    def dbg_summary(self) -> Dict[str, Any]:
+        return self._debug.summary()
+
+    def dbg_report(self) -> str:
+        return self._debug.report_text()
