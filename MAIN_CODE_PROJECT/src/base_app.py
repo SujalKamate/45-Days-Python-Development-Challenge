@@ -37,7 +37,7 @@ from webhook_delivery import WebhookDeliveryEngine
 
 from py_preprocessor import PreprocessorEngine
 
-from state_diff import StateDiffEngine
+from debug_repl import DebugREPLEngine
 
 
 @dataclass
@@ -137,7 +137,7 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self.output = _OutputProxy(self)
         self._tasks: Dict[str, Any] = {}
         self._next_id: int = 0
-        self._state_diff = StateDiffEngine()
+        self._debug = DebugREPLEngine()
 
     # ── Logging / state mutation helpers ───────────────────────────────
 
@@ -636,36 +636,31 @@ class BaseApp(DataProvider, DataProcessor, AppRunner):
         self._wal.commit_txn('main')
         self.log('Finalized successfully')
 
-    def sd_snapshot(self, key: str) -> None:
-        self._state_diff.save_snapshot(key, self.state.to_dict() if hasattr(self.state, 'to_dict') else self.state.__dict__)
+    def dbg_register_module(self, name: str, module: Any) -> None:
+        self._debug.register_module(name, module)
 
-    def sd_compare(self, before_key: str, after_key: str) -> Any:
-        return self._state_diff.diff_snapshots(before_key, after_key)
+    def dbg_register_callable(self, name: str, fn: Callable[..., Any]) -> None:
+        self._debug.register_callable(name, fn)
 
-    def sd_diff(self, before: Dict[str, Any], after: Dict[str, Any],
-                before_label: str = 'before', after_label: str = 'after') -> Any:
-        return self._state_diff.diff_states(before, after, before_label, after_label)
+    def dbg_trace(self, fn: Callable[..., Any], *args: Any,
+                  label: str = '', **kwargs: Any) -> Dict[str, Any]:
+        return self._debug.trace_execution(fn, *args, label=label, **kwargs)
 
-    def sd_record(self, version: str, before: Dict[str, Any], after: Dict[str, Any]) -> Any:
-        return self._state_diff.record_change(version, before, after)
+    def dbg_trace_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._debug.trace_history(limit)
 
-    def sd_ignore_path(self, path: str) -> None:
-        self._state_diff.ignore_path(path)
+    def dbg_snapshot(self, key: str) -> None:
+        self._debug.snapshot_state(key, self._debug.inspector.state_snapshot(self))
 
-    def sd_ignore_type(self, type_name: str) -> None:
-        self._state_diff.ignore_type(type_name)
+    def dbg_start_repl(self) -> None:
+        self._debug.register_module('base_app', self)
+        self._debug.register_callable('run', self.run)
+        self._debug.register_callable('dataset', self.dataset)
+        self._debug.register_callable('process_dataset', self.process_dataset)
+        self._debug.start_repl()
 
-    def sd_changelog(self) -> str:
-        return self._state_diff.text_changelog()
+    def dbg_summary(self) -> Dict[str, Any]:
+        return self._debug.summary()
 
-    def sd_changelog_html(self) -> str:
-        return self._state_diff.html_changelog()
-
-    def sd_changelog_md(self) -> str:
-        return self._state_diff.markdown_changelog()
-
-    def sd_summary(self) -> Dict[str, Any]:
-        return self._state_diff.summary()
-
-    def sd_report(self) -> str:
-        return self._state_diff.report_text()
+    def dbg_report(self) -> str:
+        return self._debug.report_text()
